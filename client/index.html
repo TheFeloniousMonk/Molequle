@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Molequle</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400&family=IBM+Plex+Mono:wght@400&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <!-- 44px branded header bar -->
+  <header id="app-header">
+    <div class="header-left">
+      <span class="wordmark">Molequle</span>
+      <span class="subtitle">emergent art system</span>
+    </div>
+    <div class="header-right">
+      <div class="mini-status">
+        <span class="mini-stat">pop: <span id="mini-population" class="mini-val">0</span></span>
+        <span class="mini-stat-sep">&middot;</span>
+        <span class="mini-stat">bonds: <span id="mini-bonds" class="mini-val">0</span></span>
+        <span class="mini-stat-sep">&middot;</span>
+        <span class="mini-stat"><span id="mini-season" class="mini-val">&mdash;</span></span>
+      </div>
+      <button id="gear-btn" aria-label="Toggle control panel">&#9881;</button>
+    </div>
+  </header>
+
+  <!-- Canvas fills remaining viewport -->
+  <div id="canvas-container">
+    <canvas id="trail-canvas" width="1920" height="1080"></canvas>
+    <canvas id="main-canvas" width="1920" height="1080"></canvas>
+  </div>
+
+  <!-- Click-outside overlay -->
+  <div id="panel-overlay"></div>
+
+  <!-- Collapsible right-side control panel -->
+  <div id="control-panel">
+    <div id="panel-inner">
+      <!-- Sections will be built by ui.js -->
+    </div>
+  </div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

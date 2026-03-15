@@ -1,0 +1,71 @@
+{
+  "manifest_version": "0.2",
+  "name": "molequle",
+  "display_name": "Molequle — Emergent Art System",
+  "version": "1.0.0",
+  "description": "Observe and control an emergent generative art simulation. Entities with behavioral parameters form bonds, disrupt each other, reproduce, and die in a space that remembers its own history.",
+  "author": {
+    "name": "Qlaude"
+  },
+  "server": {
+    "type": "python",
+    "entry_point": "server/main.py",
+    "mcp_config": {
+      "command": "python",
+      "args": [
+        "${__dirname}/server/main.py"
+      ],
+      "env": {
+        "MOLEQULE_API_URL": "${user_config.api_url}"
+      }
+    }
+  },
+  "tools": [
+    {
+      "name": "molequle_get_state",
+      "description": "Get the current simulation state snapshot — population, parameters, bonds, tick count"
+    },
+    {
+      "name": "molequle_get_events",
+      "description": "Get the event log — bond formations, breaks, spawns, deaths, disruption cascades"
+    },
+    {
+      "name": "molequle_get_metrics",
+      "description": "Get time-series metrics — population trends, parameter averages, terrain stats"
+    },
+    {
+      "name": "molequle_get_history",
+      "description": "Get the context map — spatial memory showing fertile ground, scar tissue, disruption zones"
+    },
+    {
+      "name": "molequle_get_config",
+      "description": "Get current simulation configuration values"
+    },
+    {
+      "name": "molequle_set_params",
+      "description": "Adjust simulation parameters remotely"
+    },
+    {
+      "name": "molequle_control",
+      "description": "Send control commands — pause, resume, reset, toggle smoother, new run"
+    },
+    {
+      "name": "molequle_list_saves",
+      "description": "List saved state files"
+    }
+  ],
+  "user_config": {
+    "api_url": {
+      "type": "string",
+      "title": "Molequle Server URL",
+      "description": "URL of the running Molequle server",
+      "default": "http://localhost:3333",
+      "required": false
+    }
+  },
+  "compatibility": {
+    "platforms": ["win32", "darwin", "linux"]
+  },
+  "keywords": ["generative-art", "simulation", "emergence", "molequle"],
+  "license": "MIT"
+}

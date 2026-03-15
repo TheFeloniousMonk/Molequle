@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+mcp/lib/
+
+# Saved state files
+data/
+
+# Project root markdown (except README)
+/*.md
+!README.md
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.pyc

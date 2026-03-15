@@ -1,0 +1,13 @@
+{
+  "name": "molequle-server",
+  "version": "1.0.0",
+  "description": "Local server for Molequle — an emergent art system",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.0"
+  }
+}
