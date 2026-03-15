@@ -145,6 +145,7 @@ emergent-system/
       renderer.js     Canvas rendering (entities, trails, overlays)
       events.js       Event logging and server communication
       ui.js           Control panel, sliders, charts
+      weather.js      Seasonal cycles, currents, blooms, storms
       prng.js         Seeded random number generator
   mcp/
     manifest.json     MCPB extension manifest
