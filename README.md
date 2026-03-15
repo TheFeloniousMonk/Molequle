@@ -27,10 +27,16 @@ Open **http://localhost:3333** in your browser. The simulation starts automatica
 | N | New run (random seed) |
 
 ### UI Panel
-The control panel below the canvas has three columns:
-- **Parameters** — sliders for all simulation thresholds (bond radius, disruption threshold, max population, etc.)
-- **Status** — live population count, bond count, average parameter values, tick count, run time
+A mini-status bar in the header shows population, bonds, and current season at a glance. Click the gear icon to open the slide-out control panel, which contains collapsible accordion sections:
+- **Status** — live population, bonds, parameter averages (S/I/V/B/D bars), tick, run time, seed, smoother state, weather conditions
 - **Charts** — population over time and parameter distribution bars
+- **Simulation** — speed slider, seed input, new run / reset buttons
+- **Bonds** — bond radius, duration, rest distance, hardening, bonded floors
+- **Disruption** — disruption threshold, radius, regen cap
+- **Population** — spawn threshold, community/loneliness/crush thresholds, max population, max age
+- **Weather** — season length/amplitude, current/bloom/storm parameters
+- **Visual** — trail decay rate, context map half-life
+- **Toggles** — The Smoother, context map, trails, pause
 
 ## REST API
 
