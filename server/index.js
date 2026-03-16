@@ -2,6 +2,8 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const cors = require('cors');
+const TrendStore = require('./trends');
+const WeatherLog = require('./weather-log');
 
 const app = express();
 app.use(cors());
@@ -10,6 +12,12 @@ app.use(express.static(path.join(__dirname, '../client')));
 
 const DATA_DIR = path.join(__dirname, 'data');
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+
+// Trend store & weather log (persistent, never autopruned)
+const trendStore = new TrendStore(path.join(DATA_DIR, 'trends.json'));
+trendStore.load();
+const weatherLog = new WeatherLog(path.join(DATA_DIR, 'weather-log.json'));
+weatherLog.load();
 
 // State received from client
 let currentState = null;
@@ -20,6 +28,8 @@ let metrics = [];
 app.post('/api/state', (req, res) => {
   currentState = req.body;
   currentState.receivedAt = Date.now();
+  // Detect weather events by diffing consecutive state snapshots
+  weatherLog.detectAndLog(currentState);
   res.json({ ok: true });
 });
 
@@ -35,6 +45,8 @@ app.post('/api/events', (req, res) => {
 app.post('/api/metrics', (req, res) => {
   metrics.push(req.body);
   if (metrics.length > 2000) metrics = metrics.slice(-2000);
+  // Feed into trend store for RRD-style persistence
+  trendStore.push(req.body);
   res.json({ ok: true });
 });
 
@@ -129,6 +141,10 @@ const PARAM_RANGES = {
   driftNoiseScale: { min: 0.0, max: 0.01 },
   noveltyThreshold: { min: 200, max: 5000 },
   noveltyBoost: { min: 0.0, max: 0.1 },
+  // Bond topology
+  secondDegreeStrength: { min: 0.0, max: 1.0 },
+  sharedNeighborBonus: { min: 0.0, max: 0.2 },
+  secondDegreeMaxRange: { min: 50, max: 500 },
 };
 
 // Qlaude can adjust parameters
@@ -224,13 +240,29 @@ app.get('/api/saves', (req, res) => {
   res.json({ saves: files });
 });
 
+// ── Trend & Weather API ───────────────────────────────────────────────
+
+app.get('/api/trends', (req, res) => {
+  const tier = req.query.tier || 'all';
+  const since = req.query.since ? parseInt(req.query.since) : undefined;
+  const last_n = req.query.last_n ? parseInt(req.query.last_n) : undefined;
+  res.json(trendStore.query({ tier, since, last_n }));
+});
+
+app.get('/api/weather-log', (req, res) => {
+  const since = req.query.since ? parseInt(req.query.since) : undefined;
+  const type = req.query.type || undefined;
+  const last_n = req.query.last_n ? parseInt(req.query.last_n) : 50;
+  res.json(weatherLog.query({ since, type, last_n }));
+});
+
 // ── Auto-save pruning ─────────────────────────────────────────────────
 const DISK_CAP_BYTES = 100 * 1024 * 1024; // 100MB
 
 function pruneAutoSaves() {
   try {
     const files = fs.readdirSync(DATA_DIR)
-      .filter(f => f.endsWith('.json') && f !== 'latest.json' && f !== 'pending-params.json' && f !== 'pending-control.json')
+      .filter(f => f.endsWith('.json') && f !== 'latest.json' && f !== 'pending-params.json' && f !== 'pending-control.json' && f !== 'trends.json' && f !== 'weather-log.json')
       .map(f => {
         const fp = path.join(DATA_DIR, f);
         const stat = fs.statSync(fp);
@@ -254,6 +286,18 @@ function pruneAutoSaves() {
     console.warn('pruneAutoSaves error:', err.message);
   }
 }
+
+// ── Graceful shutdown ─────────────────────────────────────────────────
+
+function shutdown() {
+  console.log('\nSaving trend store and weather log...');
+  trendStore.save();
+  weatherLog.save();
+  process.exit(0);
+}
+
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
 
 const PORT = process.env.PORT || 3333;
 app.listen(PORT, () => console.log(`Molequle server running on http://localhost:${PORT}`));

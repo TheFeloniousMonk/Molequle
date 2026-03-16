@@ -172,6 +172,31 @@ export class Entity {
       forceY += (dy / dist) * springMag;
     }
 
+    // Second-degree attraction: entities 2 bond-hops away feel a weak mutual pull.
+    // This curves chains toward closure — the tail drifts toward the head.
+    const secondDegreeStrength = config.secondDegreeStrength ?? 0.15;
+    const secondDegreeMaxRange = config.secondDegreeMaxRange ?? 200;
+    if (secondDegreeStrength > 0 && this.bonds.length > 0) {
+      for (const bond of this.bonds) {
+        const neighbor = entityMap_move[bond.targetId];
+        if (!neighbor || !neighbor.alive) continue;
+        for (const neighborBond of neighbor.bonds) {
+          if (neighborBond.targetId === this.id) continue; // skip back-link
+          if (this.bonds.some(b => b.targetId === neighborBond.targetId)) continue; // already directly bonded
+          const target = entityMap_move[neighborBond.targetId];
+          if (!target || !target.alive) continue;
+          const dx = this._wrappedDx(target.x - this.x, canvasWidth);
+          const dy = this._wrappedDy(target.y - this.y, canvasHeight);
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < 1 || dist > secondDegreeMaxRange) continue;
+          const falloff = 1 - dist / secondDegreeMaxRange;
+          const mag = secondDegreeStrength * falloff * this.sociability;
+          forceX += (dx / dist) * mag;
+          forceY += (dy / dist) * mag;
+        }
+      }
+    }
+
     // Velocity damping
     const damping = 0.95 - this.inertia * 0.03;
     this.vx *= damping;
@@ -664,6 +689,23 @@ export class Entity {
 
       // Strength increases passively
       bond.strength = Math.min(1.0, bond.strength + 0.001);
+
+      // ── Shared-neighbor reinforcement ──
+      // Bonds in triangles/diamonds are structurally stronger than chain links.
+      // Each shared bonded neighbor adds a strength bonus per tick.
+      const sharedNeighborBonus = config.sharedNeighborBonus ?? 0.03;
+      if (sharedNeighborBonus > 0 && partner && partner.alive) {
+        let sharedCount = 0;
+        for (const myBond of this.bonds) {
+          if (myBond.targetId === bond.targetId) continue;
+          if (partner.bonds.some(pb => pb.targetId === myBond.targetId)) {
+            sharedCount++;
+          }
+        }
+        if (sharedCount > 0) {
+          bond.strength = Math.min(1.0, bond.strength + sharedNeighborBonus * sharedCount);
+        }
+      }
 
       // ── Bond hardening ──
       // Young bonds are fragile. Bonds that survive past hardeningAge become

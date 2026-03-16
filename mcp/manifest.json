@@ -52,6 +52,14 @@
     {
       "name": "molequle_list_saves",
       "description": "List saved state files"
+    },
+    {
+      "name": "molequle_get_trends",
+      "description": "Get trend data — multi-tier ring buffer with 30s, 10min, and 2hr rollups of population, parameters, bonds, and terrain metrics"
+    },
+    {
+      "name": "molequle_get_weather_log",
+      "description": "Get weather event log — season changes, bloom/storm/current events with timestamps and details"
     }
   ],
   "user_config": {

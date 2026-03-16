@@ -573,6 +573,147 @@ def molequle_control(command: str, seed: int | None = None) -> str:
     return f"Command '{command}' queued.{seed_str} Will be applied on next client poll (~2s)."
 
 
+# ── Tool: Get Trends ──────────────────────────────────────────────────
+
+@mcp.tool()
+def molequle_get_trends(
+    tier: str = "all",
+    since: int | None = None,
+    last_n: int | None = None,
+) -> str:
+    """Get long-term trend data from the RRD-style trend store.
+
+    The trend store preserves key simulation metrics at decreasing resolution
+    over time — recent data at high resolution, older data compressed. Unlike
+    the metrics buffer (which only holds ~2000 recent snapshots), the trend
+    store is never pruned and survives server restarts.
+
+    Tier 1 ("Recent"): every 300 ticks, up to 2,400 entries (~2 hours)
+    Tier 2 ("Hours"): every 6,000 ticks, up to 1,728 entries (~48 hours)
+    Tier 3 ("History"): every 72,000 ticks, unlimited (~20 min resolution)
+
+    Each entry contains: population, bonds, births, deaths, disruptions,
+    mean/std of all 5 behavioral parameters (S/I/V/B/D), context map cell
+    counts, season info, active weather counts, bond density, avg entity age.
+
+    Args:
+        tier: Which tier(s) to return — '1', '2', '3', or 'all' (default: 'all').
+        since: Only return entries after this tick number (optional).
+        last_n: Maximum entries per tier (optional).
+    """
+    params = {}
+    if tier != "all":
+        params["tier"] = tier
+    if since is not None:
+        params["since"] = str(since)
+    if last_n is not None:
+        params["last_n"] = str(last_n)
+
+    data = api_get("/api/trends", params=params)
+
+    lines = ["# Molequle Trends", ""]
+
+    for tier_key in ["tier1", "tier2", "tier3"]:
+        entries = data.get(tier_key)
+        if entries is None:
+            continue
+        tier_num = tier_key[-1]
+        tier_names = {"1": "Recent (300-tick)", "2": "Hours (6k-tick)", "3": "History (72k-tick)"}
+        lines.append(f"## Tier {tier_num} — {tier_names[tier_num]}")
+        lines.append(f"Entries: {len(entries)}")
+
+        if entries:
+            first = entries[0]
+            last = entries[-1]
+            lines.append(f"Range: tick {first.get('tick', '?')} → {last.get('tick', '?')}")
+            lines.append("")
+
+            # Show latest entry summary
+            e = last
+            lines.append(f"**Latest** (tick {e.get('tick')}):")
+            lines.append(f"  Pop: {e.get('population', 0)} | Bonds: {e.get('bonds', 0)} | "
+                         f"Births: {e.get('births', 0)} | Deaths: {e.get('deaths', 0)} | "
+                         f"Disruptions: {e.get('disruptions', 0)}")
+            lines.append(f"  S={e.get('mean_S', 0):.3f} I={e.get('mean_I', 0):.3f} "
+                         f"V={e.get('mean_V', 0):.3f} B={e.get('mean_B', 0):.3f} "
+                         f"D={e.get('mean_D', 0):.3f}")
+            lines.append(f"  Season: {e.get('season', '?')} (warmth {e.get('warmth', 0):.2f})")
+            lines.append(f"  Blooms: {e.get('active_blooms', 0)} | "
+                         f"Storms: {e.get('active_storms', 0)} | "
+                         f"Currents: {e.get('active_currents', 0)}")
+
+            # Population trend across this tier
+            pops = [x.get("population", 0) for x in entries]
+            lines.append(f"  Pop range: {min(pops)}–{max(pops)}")
+        lines.append("")
+
+    text = "\n".join(lines)
+    if len(text) > CHARACTER_LIMIT:
+        text = text[:CHARACTER_LIMIT] + "\n\n... truncated"
+    return text
+
+
+# ── Tool: Get Weather Log ─────────────────────────────────────────────
+
+@mcp.tool()
+def molequle_get_weather_log(
+    since: int | None = None,
+    type: str | None = None,
+    last_n: int = 50,
+) -> str:
+    """Get the weather event log — lifecycle of blooms, storms, currents, and seasons.
+
+    Records when weather events spawn, end, and when seasons change. Use this
+    to correlate weather events with trend data: "Did bond count spike when
+    a bloom appeared at tick 1,200,000?"
+
+    Event types: bloom_spawn, bloom_end, storm_spawn, storm_end,
+    current_spawn, current_end, season_change.
+
+    Args:
+        since: Only return events after this tick number (optional).
+        type: Filter by event type, e.g. 'storm_spawn' (optional).
+        last_n: Maximum events to return (default: 50).
+    """
+    params = {"last_n": str(last_n)}
+    if since is not None:
+        params["since"] = str(since)
+    if type is not None:
+        params["type"] = type
+
+    data = api_get("/api/weather-log", params=params)
+    events = data.get("events", [])
+    total = data.get("total", len(events))
+
+    type_str = f" [type: {type}]" if type else ""
+    since_str = f" (since tick {since})" if since else ""
+
+    lines = [
+        "# Weather Event Log",
+        f"Showing {len(events)} of {total} events{since_str}{type_str}",
+        "",
+    ]
+
+    for evt in events:
+        tick = evt.get("tick", "?")
+        etype = evt.get("event_type", "?")
+        details = evt.get("details", {})
+
+        if "season" in etype:
+            detail = f"{details.get('from', '?')} → {details.get('to', '?')} (warmth {details.get('warmth', 0):.2f})"
+        elif "current" in etype:
+            detail = (f"({details.get('x1', 0):.0f},{details.get('y1', 0):.0f})→"
+                      f"({details.get('x2', 0):.0f},{details.get('y2', 0):.0f}) "
+                      f"str={details.get('strength', 0):.2f}")
+        else:
+            detail = (f"at ({details.get('x', 0):.0f},{details.get('y', 0):.0f}) "
+                      f"r={details.get('radius', 0):.0f} int={details.get('intensity', 0):.1f}")
+
+        lines.append(f"- **[{tick}]** `{etype}`: {detail}")
+
+    return "\n".join(lines)
+
+
 # ── Tool: List Saves ───────────────────────────────────────────────────
 
 @mcp.tool()
