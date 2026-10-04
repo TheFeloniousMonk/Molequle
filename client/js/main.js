@@ -200,6 +200,10 @@ async function init() {
   contextMap = new ContextMap(config.gridCols, config.gridRows, config.canvasWidth, config.canvasHeight);
   renderer = new Renderer(mainCanvas, trailCanvas);
   eventSystem = new EventSystem();
+  // Read module state at call time — resetSimulation() reassigns these
+  eventSystem.setStateProvider(() => ({
+    entities, contextMap, config, tick, seed, smoother: config.smoother, startTime, weatherSystem
+  }));
   weatherSystem = new WeatherSystem(rng);
 
   // Try to load saved state
@@ -490,14 +494,16 @@ function simulationTick() {
   if (eventSystem.shouldFlushEvents(tick)) {
     eventSystem.flushEvents();
   }
+  // State push and save are only flagged here; serialization runs in an
+  // idle callback outside the animation frame (see EventSystem._runDeferred)
   if (eventSystem.shouldPushState(tick)) {
-    eventSystem.pushState(entities, contextMap, config, tick, seed, config.smoother, startTime, weatherSystem);
+    eventSystem.requestStatePush();
   }
   if (eventSystem.shouldPushMetrics(tick)) {
     eventSystem.pushMetrics(entities, contextMap, tick, config, weatherSystem);
   }
   if (eventSystem.shouldSave(tick)) {
-    eventSystem.saveState(entities, contextMap, config, tick, seed, config.smoother, startTime, weatherSystem);
+    eventSystem.requestSave();
   }
   if (eventSystem.shouldPoll(tick)) {
     pollServer();

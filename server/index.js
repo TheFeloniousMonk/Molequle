@@ -24,13 +24,49 @@ let currentState = null;
 let eventLog = [];
 let metrics = [];
 
+// Full parameterHistory per entity id. The client sends only new entries
+// each push (parameterHistory grows for an entity's whole lifetime).
+let parameterHistories = new Map();
+
+// Rebuild each entity's full parameterHistory from the pushed delta, in place.
+// Entity shape served by GET /api/state is unchanged. Returns true if the
+// server is missing earlier entries (e.g. after a restart) and needs a full resend.
+function mergeParameterHistories(state) {
+  if (!Array.isArray(state.entities)) return false;
+  const next = new Map();
+  let missing = false;
+  for (const e of state.entities) {
+    const from = e.parameterHistoryFrom || 0; // absent = full history (older clients)
+    delete e.parameterHistoryFrom;
+    const delta = Array.isArray(e.parameterHistory) ? e.parameterHistory : [];
+    let full = delta;
+    if (from > 0) {
+      const prev = parameterHistories.get(e.id);
+      if (prev && prev.length === from) {
+        prev.push(...delta);
+        full = prev;
+      } else if (prev && prev.length > from) {
+        // Re-sent from an older base (previous response was lost)
+        full = prev.slice(0, from).concat(delta);
+      } else {
+        missing = true;
+      }
+    }
+    e.parameterHistory = full;
+    next.set(e.id, full);
+  }
+  parameterHistories = next;
+  return missing;
+}
+
 // Client pushes state to server periodically
 app.post('/api/state', (req, res) => {
+  const resendFullHistory = mergeParameterHistories(req.body);
   currentState = req.body;
   currentState.receivedAt = Date.now();
   // Detect weather events by diffing consecutive state snapshots
   weatherLog.detectAndLog(currentState);
-  res.json({ ok: true });
+  res.json(resendFullHistory ? { ok: true, resendFullHistory: true } : { ok: true });
 });
 
 // Client pushes events

@@ -1114,9 +1114,17 @@ export class Entity {
 
   /**
    * Serialize entity to a plain object for API/persistence.
+   *
+   * Returns LIVE references to nested state (bonds, maps, history) rather
+   * than copies — callers must JSON.stringify the result immediately, in the
+   * same synchronous task. Copying here was the dominant cost of a state push
+   * (object spread of large dictionary-mode maps like cellAbsenceTicks).
+   *
+   * @param {number} [historyFrom=0] - Only include parameterHistory entries
+   *   from this index onward (used for delta pushes; 0 = full history).
    * @returns {object}
    */
-  serialize() {
+  serialize(historyFrom = 0) {
     return {
       id: this.id,
       x: this.x,
@@ -1128,21 +1136,21 @@ export class Entity {
       volatility: this.volatility,
       bondAffinity: this.bondAffinity,
       disruptionCharge: this.disruptionCharge,
-      bonds: this.bonds.map(b => ({ ...b })),
+      bonds: this.bonds,
       age: this.age,
-      parameterHistory: this.parameterHistory,
+      parameterHistory: historyFrom > 0 ? this.parameterHistory.slice(historyFrom) : this.parameterHistory,
       alive: this.alive,
       fadeProgress: this.fadeProgress,
       isolationTicks: this.isolationTicks,
       relationalLoneliness: this.relationalLoneliness,
       recentBondBreakTick: this.recentBondBreakTick,
-      proximityTicks: { ...this.proximityTicks },
+      proximityTicks: this.proximityTicks,
       hueOffset: this.hueOffset,
       disruptionRegenNoise: this.disruptionRegenNoise,
-      birthParams: { ...this.birthParams },
+      birthParams: this.birthParams,
       lowSociabilityTicks: this.lowSociabilityTicks,
       lastCellKey: this.lastCellKey,
-      cellAbsenceTicks: { ...this.cellAbsenceTicks }
+      cellAbsenceTicks: this.cellAbsenceTicks
     };
   }
 
