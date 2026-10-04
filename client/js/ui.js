@@ -219,6 +219,7 @@ export class UI {
       container.appendChild(this._sliderRow('Bond Hardening Resist', 'bondHardeningResistance', 0.05, 0.5, 0.01, 0.2));
       container.appendChild(this._sliderRow('Bonded S Floor', 'bondedSociabilityFloor', 0.0, 0.4, 0.01, 0.15));
       container.appendChild(this._sliderRow('Bonded V Floor', 'bondedVolatilityFloor', 0.0, 0.4, 0.01, 0.2));
+      container.appendChild(this._sliderRow('Introduction Factor', 'introductionFactor', 0.0, 0.8, 0.01, 0.3));
     });
   }
 

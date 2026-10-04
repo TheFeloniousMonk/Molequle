@@ -114,9 +114,10 @@ const DEFAULT_CONFIG = {
   stormMax: 2,
 
   // Bond topology: second-degree attraction & shared-neighbor reinforcement
-  secondDegreeStrength: 0.15,    // attraction force between 2-hop neighbors (0 = off)
-  sharedNeighborBonus: 0.03,     // bond strength bonus per shared neighbor per tick
+  secondDegreeStrength: 0.4,     // attraction force between 2-hop neighbors (0 = off)
+  sharedNeighborBonus: 0.12,     // bond strength bonus per shared neighbor per tick
   secondDegreeMaxRange: 200,     // max distance for second-degree pull
+  introductionFactor: 0.3,      // per-shared-neighbor reduction in bond formation time
 
   // Display toggles
   showTrails: true,

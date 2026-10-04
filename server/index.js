@@ -143,8 +143,9 @@ const PARAM_RANGES = {
   noveltyBoost: { min: 0.0, max: 0.1 },
   // Bond topology
   secondDegreeStrength: { min: 0.0, max: 1.0 },
-  sharedNeighborBonus: { min: 0.0, max: 0.2 },
-  secondDegreeMaxRange: { min: 50, max: 500 },
+  sharedNeighborBonus: { min: 0.0, max: 0.5 },
+  secondDegreeMaxRange: { min: 50, max: 400 },
+  introductionFactor: { min: 0.0, max: 0.8 },
 };
 
 // Qlaude can adjust parameters

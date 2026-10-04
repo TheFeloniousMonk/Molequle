@@ -148,14 +148,20 @@ export class Entity {
       forceY += weatherEffects.storm.scatterForce.fy;
     }
 
-    // Scale total force by (1 - inertia)
-    forceX *= (1 - this.inertia);
-    forceY *= (1 - this.inertia);
+    // Scale total force by (1 - effectiveInertia)
+    // Cluster mass: bonded entities are harder to push around.
+    // Each bond adds inertia, so larger structures resist shear forces
+    // that would otherwise tear them apart on collision.
+    const clusterInertiaBonus = config.clusterInertiaBonus ?? 0.08;
+    const effectiveInertia = Math.min(0.95, this.inertia + clusterInertiaBonus * this.bonds.length);
+    forceX *= (1 - effectiveInertia);
+    forceY *= (1 - effectiveInertia);
 
     // Bond attraction: AFTER inertia scaling so bonds bypass dampening
     // Even a high-inertia anchor feels the pull of its bonds — tether, not suggestion
     const entityMap_move = {};
     for (const e of entities) { entityMap_move[e.id] = e; }
+    const bondDamping = config.bondDamping ?? 0.3;
     for (const bond of this.bonds) {
       const partner = entityMap_move[bond.targetId];
       if (!partner || !partner.alive) continue;
@@ -168,8 +174,19 @@ export class Entity {
       const bondRestDistance = config.bondRestDistance ?? 25;
       const displacement = dist - bondRestDistance;
       const springMag = bond.strength * 0.5 * (displacement / bondRestDistance);
-      forceX += (dx / dist) * springMag;
-      forceY += (dy / dist) * springMag;
+      // Viscous damping: opposes relative velocity along bond axis.
+      // Absorbs oscillation energy so clusters settle instead of vibrating.
+      // Without this, bond springs are underdamped — entities bounce back and
+      // forth past rest distance, building kinetic energy that shatters
+      // structures on contact with other clusters.
+      const nx = dx / dist;  // bond unit vector
+      const ny = dy / dist;
+      const relVx = partner.vx - this.vx;  // relative velocity
+      const relVy = partner.vy - this.vy;
+      const relVelAlongBond = relVx * nx + relVy * ny;  // dot product
+      const dampForce = bondDamping * relVelAlongBond;
+      forceX += nx * springMag + nx * dampForce;
+      forceY += ny * springMag + ny * dampForce;
     }
 
     // Second-degree attraction: entities 2 bond-hops away feel a weak mutual pull.
@@ -197,8 +214,8 @@ export class Entity {
       }
     }
 
-    // Velocity damping
-    const damping = 0.95 - this.inertia * 0.03;
+    // Velocity damping (uses cluster-aware inertia)
+    const damping = 0.95 - effectiveInertia * 0.03;
     this.vx *= damping;
     this.vy *= damping;
 
@@ -208,9 +225,11 @@ export class Entity {
 
     // Clamp speed
     // Weather: seasonal speed modifier
-    const effectiveMaxSpeed = weatherEffects && weatherEffects.season
+    // Cluster mass: bonded entities move slower, making collisions gentler
+    const clusterSpeedPenalty = 1 / (1 + (clusterInertiaBonus * this.bonds.length));
+    const effectiveMaxSpeed = (weatherEffects && weatherEffects.season
       ? maxSpeed * weatherEffects.season.speedMultiplier
-      : maxSpeed;
+      : maxSpeed) * clusterSpeedPenalty;
     const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
     if (speed > effectiveMaxSpeed) {
       this.vx = (this.vx / speed) * effectiveMaxSpeed;
@@ -803,8 +822,19 @@ export class Entity {
     }
     this.proximityTicks[other.id]++;
 
+    // Mutual introduction: count shared bonded neighbors
+    const myBondTargets = new Set(this.bonds.map(b => b.targetId));
+    const sharedNeighborCount = other.bonds.filter(b => myBondTargets.has(b.targetId)).length;
+
+    // Reduce formation time for introduced entities (floor at 20% of base duration)
+    const introductionFactor = config.introductionFactor ?? 0.3;
+    const effectiveDuration = Math.max(
+      bondDuration * 0.2,
+      bondDuration * (1 - introductionFactor * sharedNeighborCount)
+    );
+
     // Need sustained proximity
-    if (this.proximityTicks[other.id] < bondDuration) return null;
+    if (this.proximityTicks[other.id] < effectiveDuration) return null;
 
     // Compute bond formation probability
     const terrainHere = contextMap.getTerrainEffects(this.x, this.y, currentTick);
@@ -817,9 +847,11 @@ export class Entity {
       * weatherBondMod;
 
     if (rng() < probability) {
-      // Form bond on both entities
-      const bondData = { targetId: other.id, strength: 0.5, formedAt: currentTick };
-      const reverseBondData = { targetId: this.id, strength: 0.5, formedAt: currentTick };
+      // Form bond — introduced bonds start stronger
+      const sharedNeighborBonus = config.sharedNeighborBonus ?? 0.12;
+      const initialStrength = Math.min(1.0, 0.5 + sharedNeighborBonus * sharedNeighborCount);
+      const bondData = { targetId: other.id, strength: initialStrength, formedAt: currentTick };
+      const reverseBondData = { targetId: this.id, strength: initialStrength, formedAt: currentTick };
       this.bonds.push(bondData);
       other.bonds.push(reverseBondData);
 
@@ -847,7 +879,7 @@ export class Entity {
     }
 
     // Failed proximity discouragement: been near long enough but bond didn't form
-    if (this.proximityTicks[other.id] >= bondDuration) {
+    if (this.proximityTicks[other.id] >= effectiveDuration) {
       this.bondAffinity -= 0.001;
       other.bondAffinity -= 0.001;
     }
