@@ -398,35 +398,35 @@ export class UI {
     }
 
     // Status updates
-    document.getElementById('status-population').textContent = pop;
-    document.getElementById('status-bonds').textContent = bondCount;
-    document.getElementById('status-tick').textContent = tick;
-    document.getElementById('status-seed').textContent = seed;
-    document.getElementById('status-smoother').textContent = config.smoother ? 'ON' : 'OFF';
-    document.getElementById('status-smoother').style.color = config.smoother ? '#4fd1c5' : '';
+    this._setText('status-population', pop);
+    this._setText('status-bonds', bondCount);
+    this._setText('status-tick', tick);
+    this._setText('status-seed', seed);
+    this._setText('status-smoother', config.smoother ? 'ON' : 'OFF');
+    this._setColor('status-smoother', config.smoother ? '#4fd1c5' : '');
 
     // Mini-status header updates
-    document.getElementById('mini-population').textContent = pop;
-    document.getElementById('mini-bonds').textContent = bondCount;
+    this._setText('mini-population', pop);
+    this._setText('mini-bonds', bondCount);
 
     // Weather status
     if (weatherSystem) {
       const seasonName = weatherSystem.getSeasonName().replace('_', ' ');
       const warmth = weatherSystem.getWarmth();
-      document.getElementById('status-season').textContent = seasonName;
-      document.getElementById('status-warmth').textContent = warmth.toFixed(2);
+      this._setText('status-season', seasonName);
+      this._setText('status-warmth', warmth.toFixed(2));
       // Color warmth indicator: warm = amber, cool = blue
       const warmthColor = warmth > 0.5
         ? `rgb(${Math.round(180 + warmth * 60)}, ${Math.round(140 + warmth * 40)}, ${Math.round(60)})`
         : `rgb(${Math.round(80)}, ${Math.round(120 + warmth * 60)}, ${Math.round(160 + (1 - warmth) * 60)})`;
-      document.getElementById('status-warmth').style.color = warmthColor;
-      document.getElementById('status-blooms').textContent = weatherSystem.blooms.length;
-      document.getElementById('status-storms').textContent = weatherSystem.storms.length;
-      document.getElementById('status-storms').style.color = weatherSystem.storms.length > 0 ? '#c84a6a' : '';
-      document.getElementById('status-currents').textContent = weatherSystem.currents.length;
+      this._setColor('status-warmth', warmthColor);
+      this._setText('status-blooms', weatherSystem.blooms.length);
+      this._setText('status-storms', weatherSystem.storms.length);
+      this._setColor('status-storms', weatherSystem.storms.length > 0 ? '#c84a6a' : '');
+      this._setText('status-currents', weatherSystem.currents.length);
 
       // Mini-status season
-      document.getElementById('mini-season').textContent = seasonName;
+      this._setText('mini-season', seasonName);
     }
 
     // Runtime
@@ -435,21 +435,53 @@ export class UI {
     const h = Math.floor(secs / 3600);
     const m = Math.floor((secs % 3600) / 60);
     const s = secs % 60;
-    document.getElementById('status-runtime').textContent = `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    this._setText('status-runtime', `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`);
 
     // Parameter bars
     for (const key of paramKeys) {
-      const bar = document.getElementById(`param-bar-${key}`);
-      const val = document.getElementById(`param-val-${key}`);
-      if (bar && val) {
-        bar.style.width = `${avgs[key] * 100}%`;
-        val.textContent = avgs[key].toFixed(2);
+      if (this._el(`param-bar-${key}`) && this._el(`param-val-${key}`)) {
+        this._setWidth(`param-bar-${key}`, `${avgs[key] * 100}%`);
+        this._setText(`param-val-${key}`, avgs[key].toFixed(2));
       }
     }
 
     // Draw charts
     this._drawPopulationChart();
     this._drawParamChart(avgs);
+  }
+
+  // Cached element lookups and change-only writes: update() runs every 10
+  // ticks and most values don't change, so skip redundant DOM mutations.
+  _el(id) {
+    if (!this._elCache) this._elCache = new Map();
+    let el = this._elCache.get(id);
+    if (!el || !el.isConnected) {
+      el = document.getElementById(id);
+      this._elCache.set(id, el);
+    }
+    return el;
+  }
+
+  _setText(id, value) {
+    const el = this._el(id);
+    const text = String(value);
+    if (el && el.textContent !== text) el.textContent = text;
+  }
+
+  _setColor(id, value) {
+    const el = this._el(id);
+    if (el && el._lastColor !== value) {
+      el.style.color = value;
+      el._lastColor = value;
+    }
+  }
+
+  _setWidth(id, value) {
+    const el = this._el(id);
+    if (el && el._lastWidth !== value) {
+      el.style.width = value;
+      el._lastWidth = value;
+    }
   }
 
   _drawPopulationChart() {

@@ -1,6 +1,16 @@
 // EventSystem — bridge between browser simulation and Node/Express server
 // Handles event logging, batching, metrics, state snapshots, save/load, and polling
 
+// Deferred serialization: bulky per-entity values (hundreds of keys each) are
+// replaced by markers in the snapshot JSON, stringified a few at a time in
+// later idle slices, and assembled into the request body as a Blob. (A
+// multi-MB string body makes fetch() block while it encodes; a Blob doesn't,
+// and building it from small Blobs spreads the encoding across slices.)
+const DEFERRED_MARKER = '__molequle_deferred_';
+const DEFERRED_PER_STEP = 4;   // deferred values stringified between time checks
+const DEFERRED_PER_BLOB = 32;  // values per intermediate Blob (each Blob has fixed overhead)
+const SLICE_MS = 4;            // work budget per slice when not given an idle deadline
+
 export class EventSystem {
   constructor() {
     this.eventBuffer = [];
@@ -9,12 +19,14 @@ export class EventSystem {
     this.disruptionsSinceSnapshot = 0;
 
     // Deferred state work: the simulation only marks pushes/saves as due;
-    // serialization runs later in an idle callback, never inside the rAF frame.
+    // serialization runs later in idle callbacks, never inside the rAF frame.
     this.stateProvider = null;      // () => current sim state, set by main.js
     this.statePushDue = false;
-    this.statePushInFlight = false;
+    this.statePushInFlight = false; // from snapshot until the POST settles
     this.saveDue = false;
     this.idleScheduled = false;
+    this.activeJob = null;          // generator: one small step per next()
+    this.activeJobName = '';
 
     // parameterHistory grows for an entity's whole lifetime, so state pushes
     // send only entries the server hasn't acknowledged yet. Entity -> count.
@@ -57,7 +69,8 @@ export class EventSystem {
   // Called from the simulation tick: cheap, only flags work and schedules it.
 
   requestStatePush() {
-    if (this.statePushInFlight) return; // previous push still pending: skip this one
+    // Previous push still being built or sent: skip this one
+    if (this.statePushInFlight || this.statePushDue) return;
     this.statePushDue = true;
     this._scheduleIdle();
   }
@@ -70,50 +83,116 @@ export class EventSystem {
   _scheduleIdle() {
     if (this.idleScheduled) return;
     this.idleScheduled = true;
-    const run = () => {
+    const run = (deadline) => {
       this.idleScheduled = false;
-      this._runDeferred();
+      this._runDeferred(deadline);
     };
     if (typeof requestIdleCallback === 'function') {
-      requestIdleCallback(run, { timeout: 1000 });
+      // Mid-job, don't wait as long for idle time on a busy page
+      requestIdleCallback(run, { timeout: this.activeJob ? 100 : 1000 });
     } else {
       setTimeout(run, 0);
     }
   }
 
-  // One job per idle callback, so a push and a save that come due on the
-  // same tick don't combine into a single long task.
-  _runDeferred() {
+  // Runs job steps while this slice has time (always at least one step).
+  // A job finishing ends the slice, so a push and a save that come due on
+  // the same tick never share one.
+  _runDeferred(deadline) {
     if (!this.stateProvider) return;
-    if (this.statePushDue) {
-      this.statePushDue = false;
-      this._pushState(this.stateProvider());
-    } else if (this.saveDue) {
-      this.saveDue = false;
-      this._saveState(this.stateProvider());
+    if (!this.activeJob) {
+      if (this.statePushDue) {
+        this.statePushDue = false;
+        this.activeJob = this._pushStateJob(this.stateProvider());
+        this.activeJobName = 'molequle:pushState';
+      } else if (this.saveDue) {
+        this.saveDue = false;
+        this.activeJob = this._saveStateJob(this.stateProvider());
+        this.activeJobName = 'molequle:saveState';
+      }
     }
-    if (this.statePushDue || this.saveDue) this._scheduleIdle();
+    if (this.activeJob) {
+      const start = performance.now();
+      const useDeadline = deadline && !deadline.didTimeout;
+      for (;;) {
+        let done;
+        try {
+          done = this.activeJob.next().done;
+        } catch (err) {
+          // Drop the job rather than wedge every future push/save
+          console.warn(`EventSystem: ${this.activeJobName} failed`, err);
+          if (this.activeJobName === 'molequle:pushState') this.statePushInFlight = false;
+          done = true;
+        }
+        if (done) {
+          this.activeJob = null;
+          break;
+        }
+        if (useDeadline ? deadline.timeRemaining() < 1 : performance.now() - start > SLICE_MS) break;
+      }
+      performance.measure(this.activeJobName, { start });
+    }
+    if (this.activeJob || this.statePushDue || this.saveDue) this._scheduleIdle();
+  }
+
+  // Swap a bulky value for a marker; it's stringified later by _deferredBody
+  _defer(deferred, value) {
+    deferred.push(value);
+    return DEFERRED_MARKER + (deferred.length - 1) + '__';
+  }
+
+  // Stringify deferred values a few per step and assemble the JSON body as a
+  // Blob: snapshot text up to each marker, then that marker's value. Markers
+  // appear in the snapshot in the order they were deferred.
+  *_deferredBody(json, deferred) {
+    const blobs = [];
+    let group = [];
+    let pos = 0;
+    for (let i = 0; i < deferred.length; i++) {
+      const marker = '"' + DEFERRED_MARKER + i + '__"';
+      const at = json.indexOf(marker, pos);
+      if (at < 0) throw new Error(`EventSystem: deferred marker ${i} missing`);
+      group.push(json.slice(pos, at), JSON.stringify(deferred[i]) ?? 'null');
+      pos = at + marker.length;
+      if (i % DEFERRED_PER_BLOB === DEFERRED_PER_BLOB - 1) {
+        blobs.push(new Blob(group));
+        group = [];
+      }
+      if (i % DEFERRED_PER_STEP === DEFERRED_PER_STEP - 1) yield;
+    }
+    group.push(json.slice(pos));
+    blobs.push(new Blob(group));
+    return new Blob(blobs, { type: 'application/json' });
   }
 
   // ── Push state snapshot (fire-and-forget, parameterHistory as delta) ──
 
-  _pushState(state) {
-    if (this.statePushInFlight) return;
-    const t0 = performance.now();
+  *_pushStateJob(state) {
+    this.statePushInFlight = true;
 
+    // Step 1 — atomic snapshot of everything at this tick. The bulky values
+    // are stringified in later steps: parameterHistory (full on the first
+    // push) is copied so it's frozen at this tick; cellAbsenceTicks (hundreds
+    // of keys per entity) is slow bookkeeping in units of 100 ticks, so a few
+    // frames of skew between entities is immaterial.
     const acked = this.historyAcked;
     const sent = [];
+    const deferred = [];
     const entities = state.entities.map(e => {
       const from = acked.get(e) || 0;
-      sent.push([e, e.parameterHistory.length]);
+      const historyLength = e.parameterHistory.length;
+      sent.push([e, historyLength]);
       const data = e.serialize(from);
       data.parameterHistoryFrom = from; // server merges; stripped before it serves the state
+      data.parameterHistory = this._defer(deferred, e.parameterHistory.slice(from, historyLength));
+      data.cellAbsenceTicks = this._defer(deferred, data.cellAbsenceTicks);
       return data;
     });
-    const body = JSON.stringify(this._buildStatePayload(state, entities));
-    performance.measure('molequle:pushState', { start: t0 });
+    const snapshot = JSON.stringify(this._buildStatePayload(state, entities));
+    yield;
 
-    this.statePushInFlight = true;
+    const body = yield* this._deferredBody(snapshot, deferred);
+
     fetch('/api/state', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -220,12 +299,23 @@ export class EventSystem {
 
   // ── Save state (fire-and-forget) ───────────────────────────────────
 
-  _saveState(state, manual = false) {
-    const t0 = performance.now();
-    const payload = this._buildStatePayload(state, state.entities.map(e => e.serialize()));
+  *_saveStateJob(state, manual = false) {
+    // Step 1 — atomic snapshot; the bulky per-entity values are stringified
+    // in later steps. parameterHistory is copied (cheap: shared entry objects)
+    // so the saved history can't run ahead of the saved tick.
+    const deferred = [];
+    const entities = state.entities.map(e => {
+      const data = e.serialize();
+      data.parameterHistory = this._defer(deferred, data.parameterHistory.slice());
+      data.cellAbsenceTicks = this._defer(deferred, data.cellAbsenceTicks);
+      return data;
+    });
+    const payload = this._buildStatePayload(state, entities);
     payload._saveType = manual ? 'manual' : 'auto';
-    const body = JSON.stringify(payload);
-    performance.measure('molequle:saveState', { start: t0 });
+    const snapshot = JSON.stringify(payload);
+    yield;
+
+    const body = yield* this._deferredBody(snapshot, deferred);
     fetch('/api/save', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

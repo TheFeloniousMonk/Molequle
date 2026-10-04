@@ -1,6 +1,34 @@
 // renderer.js — Canvas 2D renderer for deep space bioluminescence aesthetic
 // Handles main entity rendering, trail persistence, context map overlay, bonds, and effects.
 
+// Hue anchors for entityColor, as unit vectors (computed once, same values as inline)
+const RAD = Math.PI / 180;
+const HUE_S = 20;   // red-orange
+const HUE_B = 150;  // green-teal
+const HUE_I = 240;  // blue-purple
+const HUE_D = 300;  // magenta-violet
+const COS_S = Math.cos(HUE_S * RAD), SIN_S = Math.sin(HUE_S * RAD);
+const COS_B = Math.cos(HUE_B * RAD), SIN_B = Math.sin(HUE_B * RAD);
+const COS_I = Math.cos(HUE_I * RAD), SIN_I = Math.sin(HUE_I * RAD);
+const COS_D = Math.cos(HUE_D * RAD), SIN_D = Math.sin(HUE_D * RAD);
+
+// True if bonds[0..before) already contains a bond to targetId
+function alreadyListed(bonds, before, targetId) {
+  for (let k = 0; k < before; k++) {
+    if (bonds[k].targetId === targetId) return true;
+  }
+  return false;
+}
+
+function hasBondTo(entity, targetId) {
+  const bonds = entity.bonds;
+  if (!bonds) return false;
+  for (let k = 0; k < bonds.length; k++) {
+    if (bonds[k].targetId === targetId) return true;
+  }
+  return false;
+}
+
 export class Renderer {
   constructor(mainCanvas, trailCanvas) {
     this.mainCanvas = mainCanvas;
@@ -10,6 +38,10 @@ export class Renderer {
     this.width = 1920;
     this.height = 1080;
     this.bondBreakFlashes = [];
+
+    // Per-frame scratch: entity colors (index-aligned with entities) and id -> index
+    this._colors = [];
+    this._indexById = new Map();
 
     // Grid dimensions for context map
     this.gridCols = 96;
@@ -34,10 +66,15 @@ export class Renderer {
     const W = this.width;
     const H = this.height;
 
-    // Build entity lookup map for bond rendering
-    const entityMap = new Map();
+    // Per-frame lookups: id -> index for bond rendering, and each entity's
+    // color computed once (used by both the trail and the entity body)
+    const indexById = this._indexById;
+    const colors = this._colors;
+    indexById.clear();
+    colors.length = entities.length;
     for (let i = 0; i < entities.length; i++) {
-      entityMap.set(entities[i].id, entities[i]);
+      indexById.set(entities[i].id, i);
+      colors[i] = this.entityColor(entities[i]);
     }
 
     // --- 1. Clear main canvas (fully transparent so trails show through) ---
@@ -64,12 +101,11 @@ export class Renderer {
 
     // --- 3. Draw trails ---
     if (config.showTrails) {
+      trailCtx.globalAlpha = 0.15;
       for (let i = 0; i < entities.length; i++) {
         const e = entities[i];
         if (!e.alive) continue;
-        const color = this.entityColor(e);
-        trailCtx.globalAlpha = 0.15;
-        trailCtx.fillStyle = color;
+        trailCtx.fillStyle = colors[i];
         trailCtx.beginPath();
         trailCtx.arc(e.x, e.y, 2, 0, Math.PI * 2);
         trailCtx.fill();
@@ -88,10 +124,10 @@ export class Renderer {
     }
 
     // --- 6. Draw bonds ---
-    this._renderBonds(ctx, entities, entityMap);
+    this._renderBonds(ctx, entities, indexById);
 
     // --- 7. Draw entities with glow ---
-    this._renderEntities(ctx, entities, config);
+    this._renderEntities(ctx, entities, config, colors);
 
     // --- 8. Draw bond break flashes ---
     this._renderBondBreakFlashes(ctx);
@@ -248,6 +284,15 @@ export class Renderer {
     const cellH = this.cellH;
     const tick = config.currentTick || 0;
 
+    // Layers are drawn in a fixed order (fertile, scarred, disruption, ghost).
+    // Cells don't overlap, so drawing layer-by-layer gives every pixel the
+    // same sequence as drawing cell-by-cell. The constant-color layers are
+    // batched into one path each instead of one fill per cell.
+    const fertile = new Path2D();
+    const ghost = new Path2D();
+    const scarred = [];    // [px, py, alpha]
+    const disrupted = [];  // [px, py]
+
     for (let gy = 0; gy < this.gridRows; gy++) {
       for (let gx = 0; gx < this.gridCols; gx++) {
         const cell = contextMap.getCellByGrid(gx, gy);
@@ -259,44 +304,43 @@ export class Renderer {
         const px = gx * cellW;
         const py = gy * cellH;
 
-        // Fertile cells
-        if (terrain.isFertile) {
-          ctx.fillStyle = 'rgba(180, 120, 60, 0.15)';
-          ctx.fillRect(px, py, cellW, cellH);
-        }
-
-        // Scarred cells
-        if (terrain.isScarred) {
-          const alpha = 0.08 + terrain.scarIntensity * 0.12;
-          ctx.fillStyle = `rgba(60, 80, 180, ${alpha})`;
-          ctx.fillRect(px, py, cellW, cellH);
-        }
-
-        // Disruption zones — flickering brightness
-        if (terrain.isDisruptionZone) {
-          const flicker = 0.08 + Math.random() * 0.12;
-          ctx.fillStyle = `rgba(200, 50, 50, ${flicker})`;
-          ctx.fillRect(px, py, cellW, cellH);
-        }
-
-        // Ghost trails
-        if (terrain.isGhostTrail) {
-          ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
-          ctx.fillRect(px, py, cellW, cellH);
-        }
+        if (terrain.isFertile) fertile.rect(px, py, cellW, cellH);
+        if (terrain.isScarred) scarred.push(px, py, 0.08 + terrain.scarIntensity * 0.12);
+        if (terrain.isDisruptionZone) disrupted.push(px, py);
+        if (terrain.isGhostTrail) ghost.rect(px, py, cellW, cellH);
       }
     }
+
+    // Fertile cells
+    ctx.fillStyle = 'rgba(180, 120, 60, 0.15)';
+    ctx.fill(fertile);
+
+    // Scarred cells
+    for (let i = 0; i < scarred.length; i += 3) {
+      ctx.fillStyle = `rgba(60, 80, 180, ${scarred[i + 2]})`;
+      ctx.fillRect(scarred[i], scarred[i + 1], cellW, cellH);
+    }
+
+    // Disruption zones — flickering brightness
+    for (let i = 0; i < disrupted.length; i += 2) {
+      const flicker = 0.08 + Math.random() * 0.12;
+      ctx.fillStyle = `rgba(200, 50, 50, ${flicker})`;
+      ctx.fillRect(disrupted[i], disrupted[i + 1], cellW, cellH);
+    }
+
+    // Ghost trails
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+    ctx.fill(ghost);
   }
 
   /**
    * Render bonds between entities as thin lines with toroidal wrapping.
    */
-  _renderBonds(ctx, entities, entityMap) {
+  _renderBonds(ctx, entities, indexById) {
     const W = this.width;
     const H = this.height;
     const halfW = W / 2;
     const halfH = H / 2;
-    const drawnPairs = new Set();
 
     ctx.lineWidth = 1;
 
@@ -306,15 +350,15 @@ export class Renderer {
 
       for (let b = 0; b < e.bonds.length; b++) {
         const bond = e.bonds[b];
-        const target = entityMap.get(bond.targetId);
-        if (!target) continue;
+        const j = indexById.get(bond.targetId);
+        if (j === undefined) continue;
+        const target = entities[j];
 
-        // Only draw each bond once — use ordered id pair as key
-        const lo = e.id < bond.targetId ? e.id : bond.targetId;
-        const hi = e.id < bond.targetId ? bond.targetId : e.id;
-        const key = lo + ':' + hi;
-        if (drawnPairs.has(key)) continue;
-        drawnPairs.add(key);
+        // Only draw each bond once: the first time the pair is seen, either
+        // earlier in this entity's list or from the partner's side if the
+        // partner came first and holds the reverse bond
+        if (alreadyListed(e.bonds, b, bond.targetId)) continue;
+        if (j < i && hasBondTo(target, e.id)) continue;
 
         const alpha = bond.strength * 0.3;
         if (alpha < 0.005) continue;
@@ -363,23 +407,24 @@ export class Renderer {
   /**
    * Render all entities as glowing circles with additive blending.
    */
-  _renderEntities(ctx, entities, config) {
+  _renderEntities(ctx, entities, config, colors) {
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
 
+    const sizeBondScale = config.sizeBondScale ?? 0.1;
+    const growthDuration = config.sizeGrowthDuration ?? 600;
+
     for (let i = 0; i < entities.length; i++) {
       const e = entities[i];
-      const color = this.entityColor(e);
+      const color = colors ? colors[i] : this.entityColor(e);
 
       // Base radius from inertia, modified by bonds and age
       let radius = 3 + e.inertia * 8;
 
       // Bond count scaling: more bonds = slightly larger (relational weight)
-      const sizeBondScale = config.sizeBondScale ?? 0.1;
       const bondSizeBoost = 1 + (e.bonds ? e.bonds.length : 0) * sizeBondScale;
 
       // Newborn growth: 80% → 100% over sizeGrowthDuration ticks
-      const growthDuration = config.sizeGrowthDuration ?? 600;
       const growthFactor = e.age < growthDuration
         ? 0.8 + 0.2 * (e.age / growthDuration)
         : 1.0;
@@ -461,19 +506,12 @@ export class Renderer {
     const I = entity.inertia;
     const B = entity.bondAffinity;
     const D = entity.disruptionCharge;
-    // Weighted angular blend across four hue anchors
-    const hueS = 20;   // red-orange
-    const hueB = 150;  // green-teal
-    const hueI = 240;  // blue-purple
-    const hueD = 300;  // magenta-violet
+    // Weighted angular blend across four hue anchors (see HUE_* constants)
     const total = S + I + B + D + 0.001; // avoid div-by-zero
     // Convert to cartesian for proper angular averaging
-    const rad = Math.PI / 180;
-    const cx = (S * Math.cos(hueS * rad) + I * Math.cos(hueI * rad) +
-                B * Math.cos(hueB * rad) + D * Math.cos(hueD * rad)) / total;
-    const cy = (S * Math.sin(hueS * rad) + I * Math.sin(hueI * rad) +
-                B * Math.sin(hueB * rad) + D * Math.sin(hueD * rad)) / total;
-    let hue = Math.atan2(cy, cx) / rad;
+    const cx = (S * COS_S + I * COS_I + B * COS_B + D * COS_D) / total;
+    const cy = (S * SIN_S + I * SIN_I + B * SIN_B + D * SIN_D) / total;
+    let hue = Math.atan2(cy, cx) / RAD;
     if (hue < 0) hue += 360;
 
     // Apply accumulated hue drift — life history shifts color

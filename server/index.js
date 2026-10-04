@@ -21,6 +21,9 @@ weatherLog.load();
 
 // State received from client
 let currentState = null;
+// JSON of currentState, built on the first GET after each push (readers
+// often poll faster than the client pushes; the state is several MB)
+let currentStateJson = null;
 let eventLog = [];
 let metrics = [];
 
@@ -64,6 +67,7 @@ app.post('/api/state', (req, res) => {
   const resendFullHistory = mergeParameterHistories(req.body);
   currentState = req.body;
   currentState.receivedAt = Date.now();
+  currentStateJson = null;
   // Detect weather events by diffing consecutive state snapshots
   weatherLog.detectAndLog(currentState);
   res.json(resendFullHistory ? { ok: true, resendFullHistory: true } : { ok: true });
@@ -90,7 +94,8 @@ app.post('/api/metrics', (req, res) => {
 
 app.get('/api/state', (req, res) => {
   if (!currentState) return res.json({ status: 'no data yet' });
-  res.json(currentState);
+  if (currentStateJson === null) currentStateJson = JSON.stringify(currentState);
+  res.type('json').send(currentStateJson);
 });
 
 app.get('/api/events', (req, res) => {
@@ -245,7 +250,11 @@ app.get('/api/pending-params', (req, res) => {
   }
 });
 
-// Full state save/load for persistence across restarts
+// Full state save/load for persistence across restarts.
+// Saves are several MB: write asynchronously so the event loop keeps serving,
+// one save at a time so concurrent saves can't interleave writes to latest.json.
+let saveQueue = Promise.resolve();
+
 app.post('/api/save', (req, res) => {
   const saveType = req.body._saveType || 'manual'; // default to manual for direct API calls
   delete req.body._saveType; // Don't persist the meta flag
@@ -253,18 +262,29 @@ app.post('/api/save', (req, res) => {
   const filename = `${prefix}-state-${Date.now()}.json`;
   const filepath = path.join(DATA_DIR, filename);
   const json = JSON.stringify(req.body); // compact — no pretty-print
-  fs.writeFileSync(filepath, json);
-  fs.writeFileSync(path.join(DATA_DIR, 'latest.json'), json);
-  pruneAutoSaves();
-  res.json({ ok: true, filename });
+  saveQueue = saveQueue
+    .then(async () => {
+      await fs.promises.writeFile(filepath, json);
+      await fs.promises.writeFile(path.join(DATA_DIR, 'latest.json'), json);
+      await pruneAutoSaves();
+    })
+    .then(
+      () => res.json({ ok: true, filename }),
+      err => {
+        console.warn('save error:', err.message);
+        res.status(500).json({ ok: false, error: err.message });
+      }
+    );
 });
 
-app.get('/api/load', (req, res) => {
-  const latestPath = path.join(DATA_DIR, 'latest.json');
-  if (fs.existsSync(latestPath)) {
-    const data = JSON.parse(fs.readFileSync(latestPath, 'utf8'));
-    res.json(data);
-  } else {
+app.get('/api/load', async (req, res) => {
+  // latest.json is compact JSON written by /api/save: send it as-is rather
+  // than parsing and re-serializing several MB
+  try {
+    const data = await fs.promises.readFile(path.join(DATA_DIR, 'latest.json'));
+    res.type('json').send(data);
+  } catch (err) {
+    if (err.code !== 'ENOENT') console.warn('load error:', err.message);
     res.json({ status: 'no saved state' });
   }
 });
@@ -296,16 +316,15 @@ app.get('/api/weather-log', (req, res) => {
 // ── Auto-save pruning ─────────────────────────────────────────────────
 const DISK_CAP_BYTES = 100 * 1024 * 1024; // 100MB
 
-function pruneAutoSaves() {
+async function pruneAutoSaves() {
   try {
-    const files = fs.readdirSync(DATA_DIR)
-      .filter(f => f.endsWith('.json') && f !== 'latest.json' && f !== 'pending-params.json' && f !== 'pending-control.json' && f !== 'trends.json' && f !== 'weather-log.json')
-      .map(f => {
-        const fp = path.join(DATA_DIR, f);
-        const stat = fs.statSync(fp);
-        return { name: f, path: fp, size: stat.size, mtime: stat.mtimeMs };
-      })
-      .sort((a, b) => a.mtime - b.mtime); // oldest first
+    const names = (await fs.promises.readdir(DATA_DIR))
+      .filter(f => f.endsWith('.json') && f !== 'latest.json' && f !== 'pending-params.json' && f !== 'pending-control.json' && f !== 'trends.json' && f !== 'weather-log.json');
+    const files = (await Promise.all(names.map(async f => {
+      const fp = path.join(DATA_DIR, f);
+      const stat = await fs.promises.stat(fp);
+      return { name: f, path: fp, size: stat.size, mtime: stat.mtimeMs };
+    }))).sort((a, b) => a.mtime - b.mtime); // oldest first
 
     const totalSize = files.reduce((sum, f) => sum + f.size, 0);
     if (totalSize <= DISK_CAP_BYTES) return;
@@ -316,7 +335,7 @@ function pruneAutoSaves() {
     let currentTotal = totalSize;
     for (const f of deletable) {
       if (currentTotal <= DISK_CAP_BYTES) break;
-      fs.unlinkSync(f.path);
+      await fs.promises.unlink(f.path);
       currentTotal -= f.size;
     }
   } catch (err) {

@@ -84,10 +84,16 @@ export class WeatherSystem {
    */
   getSeasonalModifiers(config) {
     const amplitude = config.seasonAmplitude ?? 0.5;
+    // Same inputs every call within a tick (queried per entity): reuse the
+    // result. Callers treat it as read-only.
+    const memo = this._seasonMemo;
+    if (memo && memo.phase === this.seasonPhase && memo.amplitude === amplitude) {
+      return memo.result;
+    }
     const warmth = this.getWarmth();
     const deviation = (warmth - 0.5) * amplitude; // [-0.5*amp, +0.5*amp]
 
-    return {
+    const result = {
       warmth,
       speedMultiplier: 1.0 + deviation,                        // faster in summer
       bondFormationModifier: 1.0 + 0.8 * deviation,            // bonds easier in summer
@@ -95,6 +101,8 @@ export class WeatherSystem {
       spawnModifier: 1.0 + 0.6 * deviation,                    // easier reproduction in summer
       inertiaDrift: -0.0001 * deviation,                        // summer: I nudged down, winter: I nudged up
     };
+    this._seasonMemo = { phase: this.seasonPhase, amplitude, result };
+    return result;
   }
 
   // ── Migration Currents ──────────────────────────────────────────────

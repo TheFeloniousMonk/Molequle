@@ -145,9 +145,24 @@ let startTime = Date.now();
 let running = false;
 let lastFrameTime = 0;
 
-// Spatial hash for neighbor lookups
-let spatialHash = {};
+// Spatial hash for neighbor lookups: flat grid of reusable buckets
+// (cell index = cy * cols + cx), rebuilt from scratch each tick.
 const SPATIAL_CELL_SIZE = 80;
+let spatialCols = 0;
+let spatialRows = 0;
+let spatialBuckets = [];
+
+// Per-tick id -> entity lookup (replaces per-entity map building / Array.find)
+let entityById = new Map();
+
+// Crush-check grid: built from post-movement positions for the death phase.
+// Cells are at least CRUSH_RADIUS wide, so a 3x3 block covers the radius.
+const CRUSH_RADIUS = 50;
+let crushCols = 0;
+let crushRows = 0;
+let crushCellW = 0;
+let crushCellH = 0;
+let crushBuckets = [];
 
 // Spawn cooldowns per context-map cell
 let spawnCooldowns = {};
@@ -155,14 +170,22 @@ let spawnCooldowns = {};
 // ── Spatial hashing ────────────────────────────────────────────────────
 
 function buildSpatialHash(entities) {
-  spatialHash = {};
+  const cols = Math.ceil(config.canvasWidth / SPATIAL_CELL_SIZE);
+  const rows = Math.ceil(config.canvasHeight / SPATIAL_CELL_SIZE);
+  if (cols !== spatialCols || rows !== spatialRows) {
+    spatialCols = cols;
+    spatialRows = rows;
+    spatialBuckets = Array.from({ length: cols * rows }, () => []);
+  } else {
+    for (let i = 0; i < spatialBuckets.length; i++) spatialBuckets[i].length = 0;
+  }
   for (const e of entities) {
     if (!e.alive) continue;
     const cx = Math.floor(e.x / SPATIAL_CELL_SIZE);
     const cy = Math.floor(e.y / SPATIAL_CELL_SIZE);
-    const key = `${cx},${cy}`;
-    if (!spatialHash[key]) spatialHash[key] = [];
-    spatialHash[key].push(e);
+    if (cx >= 0 && cx < cols && cy >= 0 && cy < rows) {
+      spatialBuckets[cy * cols + cx].push(e);
+    }
   }
 }
 
@@ -171,20 +194,58 @@ function getNearbyEntities(x, y, radius) {
   const cr = Math.ceil(radius / SPATIAL_CELL_SIZE);
   const cx = Math.floor(x / SPATIAL_CELL_SIZE);
   const cy = Math.floor(y / SPATIAL_CELL_SIZE);
-  const maxCX = Math.ceil(config.canvasWidth / SPATIAL_CELL_SIZE);
-  const maxCY = Math.ceil(config.canvasHeight / SPATIAL_CELL_SIZE);
+  const maxCX = spatialCols;
+  const maxCY = spatialRows;
 
   for (let dx = -cr; dx <= cr; dx++) {
+    // Toroidal wrapping for spatial hash
+    const gx = ((cx + dx) % maxCX + maxCX) % maxCX;
     for (let dy = -cr; dy <= cr; dy++) {
-      // Toroidal wrapping for spatial hash
-      const gx = ((cx + dx) % maxCX + maxCX) % maxCX;
       const gy = ((cy + dy) % maxCY + maxCY) % maxCY;
-      const key = `${gx},${gy}`;
-      const bucket = spatialHash[key];
+      const bucket = spatialBuckets[gy * maxCX + gx];
       if (bucket) {
-        for (const e of bucket) {
-          results.push(e);
-        }
+        for (let i = 0; i < bucket.length; i++) results.push(bucket[i]);
+      }
+    }
+  }
+  return results;
+}
+
+function buildCrushGrid(entities) {
+  const cols = Math.max(1, Math.floor(config.canvasWidth / CRUSH_RADIUS));
+  const rows = Math.max(1, Math.floor(config.canvasHeight / CRUSH_RADIUS));
+  if (cols !== crushCols || rows !== crushRows) {
+    crushCols = cols;
+    crushRows = rows;
+    crushBuckets = Array.from({ length: cols * rows }, () => []);
+  } else {
+    for (let i = 0; i < crushBuckets.length; i++) crushBuckets[i].length = 0;
+  }
+  crushCellW = config.canvasWidth / cols;
+  crushCellH = config.canvasHeight / rows;
+  for (const e of entities) {
+    if (!e.alive) continue;
+    const cx = Math.min(cols - 1, Math.floor(e.x / crushCellW));
+    const cy = Math.min(rows - 1, Math.floor(e.y / crushCellH));
+    if (cx >= 0 && cy >= 0) crushBuckets[cy * cols + cx].push(e);
+  }
+}
+
+// Candidates within CRUSH_RADIUS of an entity (superset; exact distance is
+// checked in checkDeath). Falls back to all entities on tiny canvases where
+// the 3x3 block would wrap onto itself and repeat cells.
+function getCrushCandidates(entity) {
+  if (crushCols < 3 || crushRows < 3) return entities;
+  const results = [];
+  const cx = Math.min(crushCols - 1, Math.floor(entity.x / crushCellW));
+  const cy = Math.min(crushRows - 1, Math.floor(entity.y / crushCellH));
+  for (let dx = -1; dx <= 1; dx++) {
+    const gx = (cx + dx + crushCols) % crushCols;
+    for (let dy = -1; dy <= 1; dy++) {
+      const gy = (cy + dy + crushRows) % crushRows;
+      const bucket = crushBuckets[gy * crushCols + gx];
+      if (bucket) {
+        for (let i = 0; i < bucket.length; i++) results.push(bucket[i]);
       }
     }
   }
@@ -356,6 +417,8 @@ function simulationTick() {
   config.currentTick = tick;
 
   buildSpatialHash(entities);
+  entityById.clear();
+  for (const e of entities) entityById.set(e.id, e);
 
   const aliveEntities = entities.filter(e => e.alive);
   const decayRate = 1 / (config.halfLifeTicks || 5000);
@@ -377,7 +440,7 @@ function simulationTick() {
 
     // Pass nearby entities instead of all for performance
     const nearby = getNearbyEntities(entity.x, entity.y, config.perceptionRadius);
-    entity.update(nearby, contextMap, config, rng, tick, weatherEffects);
+    entity.update(nearby, contextMap, config, rng, tick, weatherEffects, entityById);
 
     // Apply smoother if enabled
     if (config.smoother) {
@@ -386,12 +449,16 @@ function simulationTick() {
   }
 
   // ── Bond updates ──
+  // Disruptors in entity order. D, alive and positions don't change during
+  // this phase, so one list serves every bond instead of scanning all entities.
+  const bondDisruptionThreshold = config.disruptionThreshold || 0.6;
+  const disruptors = entities.filter(e => e.alive && e.disruptionCharge > bondDisruptionThreshold);
   for (const entity of aliveEntities) {
-    const breakEvents = entity.updateBonds(entities, contextMap, config, tick);
+    const breakEvents = entity.updateBonds(entities, contextMap, config, tick, entityById, disruptors);
     for (const evt of breakEvents) {
       eventSystem.logEvent('bond_broken', tick, evt);
       // Also break bond on the other side
-      const partner = entities.find(e => e.id === evt.entityB);
+      const partner = entityById.get(evt.entityB);
       if (partner) {
         const partnerEvt = partner.breakBond(entity.id, tick);
         if (partnerEvt) {
@@ -441,8 +508,9 @@ function simulationTick() {
   }
 
   // ── Death checks ──
+  buildCrushGrid(entities);
   for (const entity of aliveEntities) {
-    const cause = entity.checkDeath(entities, config, tick);
+    const cause = entity.checkDeath(getCrushCandidates(entity), config, tick);
     if (cause) {
       const deathEvent = entity.beginDeath(cause);
       eventSystem.logEvent('entity_died', tick, deathEvent);

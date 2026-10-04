@@ -4,6 +4,9 @@
 
 import { gaussianRandom, seededUUID } from './prng.js';
 
+// Incremented per Entity.update() call to mark that call's nearby set
+let nearbyStampCounter = 0;
+
 export class Entity {
   /**
    * @param {string} id
@@ -58,6 +61,9 @@ export class Entity {
     this.proximityTicks = {}; // { entityId: tickCount }
     this.lastCellKey = '';              // novelty tracking: last grid cell visited
     this.cellAbsenceTicks = {};         // { cellKey: ticksSinceLastVisit }
+
+    // Transient (not serialized): marks membership in the current update's nearby set
+    this._nearbyStamp = 0;
   }
 
   /**
@@ -67,9 +73,25 @@ export class Entity {
    * @param {object} config - Simulation config
    * @param {function} rng - Seeded PRNG
    * @param {number} currentTick
+   * @param {object} [weatherEffects]
+   * @param {Map} [entityById] - Global id -> entity lookup for this tick.
+   *   Bond partners are only visible if they're in `entities` (the nearby set),
+   *   which is tracked with a per-call stamp instead of building a map.
    */
-  update(entities, contextMap, config, rng, currentTick, weatherEffects) {
+  update(entities, contextMap, config, rng, currentTick, weatherEffects, entityById) {
     if (!this.alive) return;
+
+    // Mark the nearby set so partner lookups can test membership in O(1)
+    const stamp = ++nearbyStampCounter;
+    for (let i = 0; i < entities.length; i++) entities[i]._nearbyStamp = stamp;
+    if (!entityById) {
+      entityById = new Map();
+      for (const e of entities) entityById.set(e.id, e);
+    }
+    const nearbyById = (id) => {
+      const e = entityById.get(id);
+      return e !== undefined && e._nearbyStamp === stamp ? e : undefined;
+    };
 
     const perceptionRadius = config.perceptionRadius || 150;   // default 150
     const disruptionRadius = config.disruptionRadius || 80;    // default 80
@@ -77,6 +99,7 @@ export class Entity {
     const maxSpeed = config.maxSpeed || 4;                     // default 4
     const canvasWidth = config.canvasWidth || 1920;
     const canvasHeight = config.canvasHeight || 1080;
+    const highDThreshold = config.disruptionThreshold || 0.6;
 
     // ── 1. Compute movement vector ──
 
@@ -84,14 +107,14 @@ export class Entity {
     let forceY = 0;
 
     // Social force: attraction/repulsion based on sociability
+    const direction = (this.sociability - 0.5) * 2; // [-1, 1]
     for (const other of entities) {
-      if (other.id === this.id || !other.alive) continue;
+      if (other === this || !other.alive) continue;
       const dx = this._wrappedDx(other.x - this.x, canvasWidth);
       const dy = this._wrappedDy(other.y - this.y, canvasHeight);
       const dist = Math.sqrt(dx * dx + dy * dy);
       if (dist < 1 || dist > perceptionRadius) continue;
 
-      const direction = (this.sociability - 0.5) * 2; // [-1, 1]
       const falloff = 1 - dist / perceptionRadius;    // linear falloff
       const magnitude = direction * falloff;
       forceX += (dx / dist) * magnitude;
@@ -130,8 +153,8 @@ export class Entity {
 
     // Disruption scatter: repulsive force from nearby high-D entities
     for (const other of entities) {
-      if (other.id === this.id || !other.alive) continue;
-      if (other.disruptionCharge <= (config.disruptionThreshold || 0.6)) continue;
+      if (other === this || !other.alive) continue;
+      if (other.disruptionCharge <= highDThreshold) continue;
       const dx = this._wrappedDx(this.x - other.x, canvasWidth);
       const dy = this._wrappedDy(this.y - other.y, canvasHeight);
       const dist = Math.sqrt(dx * dx + dy * dy);
@@ -159,11 +182,9 @@ export class Entity {
 
     // Bond attraction: AFTER inertia scaling so bonds bypass dampening
     // Even a high-inertia anchor feels the pull of its bonds — tether, not suggestion
-    const entityMap_move = {};
-    for (const e of entities) { entityMap_move[e.id] = e; }
     const bondDamping = config.bondDamping ?? 0.3;
     for (const bond of this.bonds) {
-      const partner = entityMap_move[bond.targetId];
+      const partner = nearbyById(bond.targetId);
       if (!partner || !partner.alive) continue;
       const dx = this._wrappedDx(partner.x - this.x, canvasWidth);
       const dy = this._wrappedDy(partner.y - this.y, canvasHeight);
@@ -195,12 +216,12 @@ export class Entity {
     const secondDegreeMaxRange = config.secondDegreeMaxRange ?? 200;
     if (secondDegreeStrength > 0 && this.bonds.length > 0) {
       for (const bond of this.bonds) {
-        const neighbor = entityMap_move[bond.targetId];
+        const neighbor = nearbyById(bond.targetId);
         if (!neighbor || !neighbor.alive) continue;
         for (const neighborBond of neighbor.bonds) {
           if (neighborBond.targetId === this.id) continue; // skip back-link
           if (this.bonds.some(b => b.targetId === neighborBond.targetId)) continue; // already directly bonded
-          const target = entityMap_move[neighborBond.targetId];
+          const target = nearbyById(neighborBond.targetId);
           if (!target || !target.alive) continue;
           const dx = this._wrappedDx(target.x - this.x, canvasWidth);
           const dy = this._wrappedDy(target.y - this.y, canvasHeight);
@@ -244,14 +265,25 @@ export class Entity {
 
     const V = this.volatility;
 
-    // Count local density
+    // One pass over neighbors at the post-move position:
+    // - localDensity: neighbors within perceptionRadius
+    // - nearHighD: any high-D neighbor within disruptionRadius (disruption is a
+    //   local phenomenon — you shouldn't feel it from 150px away)
+    // - hasNearby: spatial isolation, used for death check only.
+    //   "Is anyone physically near me?" — the ecosystem boundary.
+    // Nothing else moves during this entity's update, so these are identical
+    // to counting at the points where they're used below.
     let localDensity = 0;
+    let nearHighD = false;
+    let hasNearby = false;
     for (const other of entities) {
-      if (other.id === this.id || !other.alive) continue;
+      if (other === this || !other.alive) continue;
       const dx = this._wrappedDx(other.x - this.x, canvasWidth);
       const dy = this._wrappedDy(other.y - this.y, canvasHeight);
       const dist = Math.sqrt(dx * dx + dy * dy);
       if (dist <= perceptionRadius) localDensity++;
+      if (dist <= socialRadius) hasNearby = true;
+      if (dist <= disruptionRadius && other.disruptionCharge > highDThreshold) nearHighD = true;
     }
 
     // ── Sociability drift ──
@@ -331,21 +363,6 @@ export class Entity {
       this.inertia += weatherEffects.season.inertiaDrift * V;
     }
 
-    // ── FIX: Detect nearHighD using disruptionRadius, not perceptionRadius ──
-    // Disruption is a local phenomenon — you shouldn't feel it from 150px away
-    let nearHighD = false;
-    for (const other of entities) {
-      if (other.id === this.id || !other.alive) continue;
-      if (other.disruptionCharge <= (config.disruptionThreshold || 0.6)) continue;
-      const dx = this._wrappedDx(other.x - this.x, canvasWidth);
-      const dy = this._wrappedDy(other.y - this.y, canvasHeight);
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist <= disruptionRadius) {
-        nearHighD = true;
-        break;
-      }
-    }
-
     // ── FIX: Volatility drift — V-scaled increase, prevents one-way ratchet ──
     if (nearHighD) {
       this.volatility += 0.0003 * V;
@@ -383,7 +400,7 @@ export class Entity {
       let totalParamDist = 0;
       let partnerCount = 0;
       for (const bond of this.bonds) {
-        const partner = entityMap_move[bond.targetId];
+        const partner = nearbyById(bond.targetId);
         if (!partner || !partner.alive) continue;
         const dS = this.sociability - partner.sociability;
         const dI = this.inertia - partner.inertia;
@@ -467,7 +484,7 @@ export class Entity {
     // anchoring) and suppress each other's D (you have something to lose).
     // This creates local color variation — the "family" palette.
     for (const bond of this.bonds) {
-      const partner = entityMap_move[bond.targetId];
+      const partner = nearbyById(bond.targetId);
       if (!partner || !partner.alive) continue;
       const bondAge = currentTick - bond.formedAt;
       if (bondAge > 100) {
@@ -575,19 +592,7 @@ export class Entity {
 
     // ── 3. Track isolation (spatial) and relational loneliness ──
 
-    // Spatial isolation: used for death check only.
-    // "Is anyone physically near me?" — the ecosystem boundary.
-    let hasNearby = false;
-    for (const other of entities) {
-      if (other.id === this.id || !other.alive) continue;
-      const dx = this._wrappedDx(other.x - this.x, canvasWidth);
-      const dy = this._wrappedDy(other.y - this.y, canvasHeight);
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist <= socialRadius) {
-        hasNearby = true;
-        break;
-      }
-    }
+    // Spatial isolation (hasNearby computed in the neighbor pass above)
     if (!hasNearby) {
       this.isolationTicks++;
     } else {
@@ -614,7 +619,7 @@ export class Entity {
       let partnerNearby = false;
       const bondBreakDist = config.bondBreakDistance || 120;
       for (const bond of this.bonds) {
-        const partner = entityMap_move[bond.targetId];
+        const partner = nearbyById(bond.targetId);
         if (!partner || !partner.alive) continue;
         const dx = this._wrappedDx(partner.x - this.x, canvasWidth);
         const dy = this._wrappedDy(partner.y - this.y, canvasHeight);
@@ -688,23 +693,30 @@ export class Entity {
    * @param {ContextMap} contextMap
    * @param {object} config
    * @param {number} currentTick
+   * @param {Map} [entityById] - Prebuilt id -> entity lookup over `entities`
+   * @param {Entity[]} [disruptors] - Alive entities above the disruption
+   *   threshold, in `entities` order (precomputed once per tick by the caller)
    * @returns {Array} Array of break event objects
    */
-  updateBonds(entities, contextMap, config, currentTick) {
+  updateBonds(entities, contextMap, config, currentTick, entityById, disruptors) {
     const bondBreakDistance = config.bondBreakDistance || 120;  // default 120
     const canvasWidth = config.canvasWidth || 1920;
     const canvasHeight = config.canvasHeight || 1080;
     const breakEvents = [];
+    if (this.bonds.length === 0) return breakEvents;
 
-    // Build entity lookup for efficiency
-    const entityMap = {};
-    for (const e of entities) {
-      entityMap[e.id] = e;
+    if (!entityById) {
+      entityById = new Map();
+      for (const e of entities) entityById.set(e.id, e);
+    }
+    if (!disruptors) {
+      const threshold = config.disruptionThreshold || 0.6;
+      disruptors = entities.filter(e => e.alive && e.disruptionCharge > threshold);
     }
 
     for (let i = this.bonds.length - 1; i >= 0; i--) {
       const bond = this.bonds[i];
-      const partner = entityMap[bond.targetId];
+      const partner = entityById.get(bond.targetId);
 
       // Strength increases passively
       bond.strength = Math.min(1.0, bond.strength + 0.001);
@@ -736,9 +748,8 @@ export class Entity {
       const hardeningFactor = bondAge > hardeningAge ? hardeningResistance : 1.0;
 
       // Disruption weakening: check if either member is near a high-D entity
-      for (const other of entities) {
-        if (other.id === this.id || other.id === bond.targetId || !other.alive) continue;
-        if (other.disruptionCharge <= (config.disruptionThreshold || 0.6)) continue;
+      for (const other of disruptors) {
+        if (other === this || other === partner) continue;
 
         // Check proximity to this entity
         const dx1 = this._wrappedDx(other.x - this.x, canvasWidth);
@@ -939,7 +950,7 @@ export class Entity {
     let bondsWeakenedCount = 0;
 
     for (const other of entities) {
-      if (other.id === this.id || !other.alive) continue;
+      if (other === this || !other.alive) continue;
 
       const dx = this._wrappedDx(other.x - this.x, canvasWidth);
       const dy = this._wrappedDy(other.y - this.y, canvasHeight);
@@ -1003,7 +1014,7 @@ export class Entity {
     // Overcrowding death
     let crushCount = 0;
     for (const other of entities) {
-      if (other.id === this.id || !other.alive) continue;
+      if (other === this || !other.alive) continue;
       const dx = this._wrappedDx(other.x - this.x, canvasWidth);
       const dy = this._wrappedDy(other.y - this.y, canvasHeight);
       const dist = Math.sqrt(dx * dx + dy * dy);
