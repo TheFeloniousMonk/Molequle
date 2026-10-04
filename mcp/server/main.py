@@ -6,9 +6,15 @@ simulation via its REST API. Runs over stdio transport.
 """
 
 import os
+import site
 import json
 from datetime import datetime
 from typing import Any
+
+# Bundled dependencies live in ../lib; make them importable regardless of
+# which interpreter the host launches (python vs. python3) or PYTHONPATH.
+# addsitedir (not sys.path.insert) so .pth files like pywin32.pth are processed.
+site.addsitedir(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lib"))
 
 import httpx
 from mcp.server.fastmcp import FastMCP
@@ -456,6 +462,11 @@ VALID_PARAMS = {
     "driftNoiseScale": (0.0, 0.01),
     "noveltyThreshold": (200, 5000),
     "noveltyBoost": (0.0, 0.1),
+    # Bond topology
+    "secondDegreeStrength": (0.0, 1.0),
+    "sharedNeighborBonus": (0.0, 0.5),
+    "secondDegreeMaxRange": (50, 400),
+    "introductionFactor": (0.0, 0.8),
 }
 
 
@@ -523,6 +534,10 @@ def molequle_set_params(params: str) -> str:
       hueDriftTravel: 0.0-1.0 (default 0.1) -- per-tick hue drift at high speed
       sizeGrowthDuration: 100-3000 (default 600) -- ticks for newborn to reach full size
       sizeBondScale: 0.0-0.5 (default 0.1) -- size increase per active bond
+      secondDegreeStrength: 0.0-1.0 (default 0.4) -- attraction force between 2-hop neighbors (0 = off)
+      sharedNeighborBonus: 0.0-0.5 (default 0.12) -- bond strength bonus per shared neighbor per tick
+      secondDegreeMaxRange: 50-400 (default 200) -- max pixel distance for second-degree pull
+      introductionFactor: 0.0-0.8 (default 0.3) -- per-shared-neighbor reduction in bond formation time (mutual introduction)
 
     Args:
         params: JSON string of parameter names to values,

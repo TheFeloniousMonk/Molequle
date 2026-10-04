@@ -1,12 +1,9 @@
 __pycache__
 *.pyc
-lib/win32
 lib/win32com
 lib/win32comext
 lib/pythonwin
-lib/pywin32_system32
 lib/PyWin32.chm
-lib/pywin32.pth
 lib/pywin32.version.txt
 lib/pywin32-311.dist-info
 lib/isapi
