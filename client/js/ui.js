@@ -291,7 +291,7 @@ export class UI {
 
   _buildVisualSection() {
     return this._createSection('VISUAL', false, (container) => {
-      container.appendChild(this._sliderRow('Trail Decay Rate', 'trailDecayRate', 0.0005, 0.01, 0.0005, 0.0015));
+      container.appendChild(this._sliderRow('Trail Decay Rate', 'trailDecayRate', 0.0005, 0.01, 0.000125, 0.001125));
       container.appendChild(this._sliderRow('Light Angle', 'lightAngle', 0, 360, 5, 225));
       container.appendChild(this._sliderRow('Context Map Half Life', 'halfLifeTicks', 1000, 20000, 100, 5000));
     });

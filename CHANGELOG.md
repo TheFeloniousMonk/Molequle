@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.0.3 — 2026-10-05
+
+Visual only; simulation results are byte-identical to 2.0.2.
+
+### Changed
+- **Metallic is brighter, and its brightest nodes look like polished mirror.**
+  Brighter ramp with a near-white chrome band at the top, stronger lit-side
+  sheen, a Fresnel-style bright rim, and a gleam that grows with surface
+  brightness. Mirror finish scales with each node's brightness, so dark
+  gunmetal stays dark.
+- **Trails persist about a third longer** — default `trailDecayRate` lowered
+  again (0.0015 → 0.001125) and faint-trail cleanup slowed to match. Worlds
+  saved with an earlier default pick up the new one on load; custom values
+  are kept.
+
 ## 2.0.2 — 2026-10-05
 
 **Simulation change: 2.0.2 worlds are not byte-identical to 2.0.1.** The same

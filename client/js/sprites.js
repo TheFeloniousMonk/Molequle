@@ -54,11 +54,19 @@ export class SpriteAtlas {
     const tDenom = element.hueRamp ? steps : steps - 1;
     this.colors = [];
     for (let s = 0; s < steps; s++) this.colors.push(rampColor(element, s / tDenom));
+    // Relative luminance (0..1) per step: scales mirror finish and gleam
+    this.lum = new Float32Array(steps);
+    for (let s = 0; s < steps; s++) {
+      const [r, g, b] = this.colors[s];
+      this.lum[s] = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+    }
+    const mirror = element.mirror || 0;
 
     // Body: one strip per step plus a neutral "storm gray" strip at index RAMP_STEPS
     this.body = buildAtlas(steps + 1, BODY_LEVELS, (ctx, i, l, cx, cy, r) => {
       const rgb = i < steps ? this.colors[i] : element.stormGray;
-      drawBody(ctx, cx, cy, r, rgb, lit, lx, ly, element.shadow, element.bodyLift ?? 0.22);
+      const finish = i < steps ? mirror * this.lum[i] * this.lum[i] : 0;
+      drawBody(ctx, cx, cy, r, rgb, lit, lx, ly, element.shadow * (1 - 0.35 * finish), element.bodyLift ?? 0.22, finish);
     });
     this.grayStep = steps;
 
@@ -125,7 +133,9 @@ function buildAtlas(count, levels, drawCell) {
   return { canvas, sx, sy, ss, levels, levelCount: levels.length };
 }
 
-function drawBody(ctx, cx, cy, r, rgb, lit, lx, ly, shadow, lift) {
+// `finish` (0..1): mirror finish — a Fresnel-style bright rim, as polished
+// surfaces brighten toward their edges (slightly more away from the light)
+function drawBody(ctx, cx, cy, r, rgb, lit, lx, ly, shadow, lift, finish = 0) {
   ctx.beginPath();
   ctx.arc(cx, cy, r, 0, TAU);
   if (!lit) {
@@ -148,6 +158,17 @@ function drawBody(ctx, cx, cy, r, rgb, lit, lx, ly, shadow, lift) {
   sg.addColorStop(1, `rgba(0, 0, 0, ${shadow * 0.75})`);
   ctx.fillStyle = sg;
   ctx.fillRect(cx - r - 1, cy - r - 1, 2 * r + 2, 2 * r + 2);
+  if (finish > 0.01) {
+    const ox = cx - lx * r * 0.08;
+    const oy = cy - ly * r * 0.08;
+    const rg = ctx.createRadialGradient(ox, oy, r * 0.55, ox, oy, r * 1.02);
+    rg.addColorStop(0, 'rgba(255, 255, 255, 0)');
+    rg.addColorStop(0.72, `rgba(255, 255, 255, ${finish * 0.3})`);
+    rg.addColorStop(0.9, `rgba(255, 255, 255, ${finish * 0.85})`);
+    rg.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = rg;
+    ctx.fillRect(cx - r - 1, cy - r - 1, 2 * r + 2, 2 * r + 2);
+  }
 }
 
 function drawHighlight(ctx, cx, cy, r, lx, ly, hl) {

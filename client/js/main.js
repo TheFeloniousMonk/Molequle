@@ -11,6 +11,9 @@ import { WeatherSystem } from './weather.js';
 import { DEFAULT_CONFIG } from './params.js';
 import { ELEMENT_NAMES } from './elements.js';
 
+// Earlier defaults of trailDecayRate (1.x, 2.0.0–2.0.2), migrated on load
+const PREVIOUS_TRAIL_DECAY_DEFAULTS = [0.003, 0.0015];
+
 // ── Global simulation state ────────────────────────────────────────────
 
 let config = { ...DEFAULT_CONFIG };
@@ -162,10 +165,10 @@ async function init() {
     tick = savedState.tick || 0;
     config = { ...DEFAULT_CONFIG, ...(savedState.config || {}) };
     config.smoother = savedState.smoother || false;
-    // 2.0 halved the default trail decay (visual only). Saves store the full
-    // config, so worlds saved with the old default would never pick up the new
-    // one; custom values are left alone.
-    if (config.trailDecayRate === 0.003) config.trailDecayRate = DEFAULT_CONFIG.trailDecayRate;
+    // The default trail decay has been lowered (visual only). Saves store the
+    // full config, so worlds saved with an earlier default would never pick up
+    // the new one; custom values are left alone.
+    if (PREVIOUS_TRAIL_DECAY_DEFAULTS.includes(config.trailDecayRate)) config.trailDecayRate = DEFAULT_CONFIG.trailDecayRate;
 
     entities = savedState.entities.map(d => Entity.deserialize(d));
 

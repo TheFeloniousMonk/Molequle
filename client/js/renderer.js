@@ -19,7 +19,7 @@ import { WeatherFx } from './weather-fx.js';
 
 const BG = '#0a0a0f';
 const TRAIL_DOT_RADIUS = 2;   // trail stroke half-width (world px)
-const TRAIL_CLEANUP_EVERY = 2; // fades per residue-cleanup pass (lower = faint trails clear faster)
+const TRAIL_CLEANUP_EVERY = 3; // fades per residue-cleanup pass (lower = faint trails clear faster)
 const ATLAS_CACHE_SIZE = 6;
 const DEV_METRIC_INTERVAL = 300;   // frames between trail luminance samples (dev only)
 
@@ -214,6 +214,7 @@ export class Renderer {
       // Highlight brightness follows disruption charge, down to the element's floor
       const hl = element.highlight;
       let hlA = lit ? hl.intensity * Math.max(hl.floor || 0, 0.55 + 0.45 * D) * opacity : 0;   // may exceed 1 (double pass)
+      if (hl.lumBoost) hlA *= 1 + hl.lumBoost * (atlas.lum[this.eStep[i]] - 0.5);   // brighter surface, brighter gleam
       let grayA = 0;
 
       if (showWeather) {

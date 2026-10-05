@@ -439,7 +439,7 @@ def molequle_set_params(params: str) -> str:
       maxPopulation: 100–800 (default 500)
       maxAge: 5000–50000 (default 20000)
       halfLifeTicks: 1000–20000 (default 5000)
-      trailDecayRate: 0.0005–0.01 (default 0.0015) — trail opacity decay per frame
+      trailDecayRate: 0.0005–0.01 (default 0.001125) — trail opacity decay per frame
       seasonLength: 2000-50000 (default 12000) -- ticks per full seasonal cycle
       seasonAmplitude: 0.0-1.0 (default 0.5) -- strength of seasonal effects
       currentCount: 0-5 (default 2) -- max simultaneous migration currents

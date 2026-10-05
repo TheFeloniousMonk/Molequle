@@ -76,27 +76,33 @@ export const ELEMENTS = {
   metallic: {
     label: 'Metallic',
     ramp: [
-      [0.00, [48, 52, 58]],     // gunmetal
-      [0.35, [104, 113, 124]],  // steel
-      [0.70, [205, 212, 220]],  // silver
-      [1.00, [238, 216, 150]],  // pale gold
+      [0.00, [52, 57, 64]],     // gunmetal
+      [0.30, [115, 125, 137]],  // steel
+      [0.60, [205, 213, 222]],  // silver
+      [0.82, [238, 243, 249]],  // polished chrome
+      [1.00, [255, 240, 190]],  // bright gold
     ],
     bodyBlend: 'source-over',
     glowBlend: 'lighter',
-    glowStrength: 0.4,         // sheen, not a glow
+    glowStrength: 0.55,        // sheen, not a glow
     bodyAlpha: 1.0,
-    bodyLift: 0.45,            // strong lit-side sheen
-    // Sharp, bright gleam that holds regardless of disruption charge.
-    // Intensity above 1 draws the highlight a second time so it blows out to white.
-    highlight: { size: 0.36, intensity: 1.7, sharpness: 0.8, floor: 0.9 },
+    bodyLift: 0.6,             // strong lit-side sheen
+    // Mirror finish: Fresnel-style bright rim and lighter shading, scaled by
+    // each ramp step's luminance, so the brightest nodes read as polished
+    // mirror while dark gunmetal stays dark
+    mirror: 0.9,
+    // Sharp, bright gleam that holds regardless of disruption charge; stronger
+    // on brighter steps. Intensity above 1 draws it twice so it blows out to white.
+    highlight: { size: 0.36, intensity: 1.7, sharpness: 0.8, floor: 0.9, lumBoost: 0.8 },
     shadow: 0.7,
     stormGray: [58, 62, 70],
-    bond: [200, 205, 215],
+    bond: [205, 210, 220],
     trailAlpha: 0.13,
     bloomTint: [230, 205, 140],
     rimTint: [200, 215, 255],
     stormFx: 'sparks',
   },
+
 
 };
 

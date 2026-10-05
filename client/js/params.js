@@ -62,7 +62,7 @@ export const DEFAULT_CONFIG = {
   sizeBondScale: 0.1,            // size increase per active bond
 
   // Trails
-  trailDecayRate: 0.0015,         // per-frame trail fade (2.0 halved it from 0.003 so patterns can build up)
+  trailDecayRate: 0.001125,       // per-frame trail fade (lowered from 0.003 in 2.0, then 0.0015, so patterns can build up)
   trailDecayScaling: true,       // scale trail decay with avg movement speed
   trailFadeInterval: 10,         // frames between trail fades (same total decay, steps big enough to survive 8-bit rounding)
   trailScale: 0.5,               // trail layer resolution relative to the main canvas
