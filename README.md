@@ -146,6 +146,7 @@ emergent-system/
     css/style.css
     js/
       main.js         Entry point, animation loop, orchestration
+      params.js       Config defaults + tunable param ranges (shared with server)
       entity.js       Entity class with parameters and behavior
       context-map.js  Accumulated history grid
       renderer.js     Canvas rendering (entities, trails, overlays)

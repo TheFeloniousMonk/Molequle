@@ -6,6 +6,7 @@ simulation via its REST API. Runs over stdio transport.
 """
 
 import os
+import re
 import site
 import json
 from datetime import datetime
@@ -401,73 +402,17 @@ def molequle_get_config() -> str:
 
 # ── Tool: Set Parameters ───────────────────────────────────────────────
 
-VALID_PARAMS = {
-    "bondRadius": (20, 80),
-    "bondDuration": (20, 120),
-    "bondRestDistance": (10, 60),
-    "bondHardeningAge": (50, 500),
-    "bondHardeningResistance": (0.05, 0.5),
-    "bondedSociabilityFloor": (0.0, 0.4),
-    "bondedVolatilityFloor": (0.0, 0.4),
-    "disruptionThreshold": (0.3, 0.9),
-    "disruptionRadius": (40, 150),
-    "disruptionRegenCap": (0.3, 1.0),
-    "spawnThreshold": (3, 10),
-    "communityThreshold": (0.2, 0.8),
-    "lonelinessThreshold": (200, 800),
-    "crushThreshold": (6, 20),
-    "maxPopulation": (100, 800),
-    "maxAge": (5000, 50000),
-    "halfLifeTicks": (1000, 20000),
-    "trailDecayRate": (0.001, 0.01),
-    "ticksPerFrame": (1, 5),
-    "seasonLength": (2000, 50000),
-    "seasonAmplitude": (0.0, 1.0),
-    "currentCount": (0, 5),
-    "currentStrength": (0.0, 1.0),
-    "currentWidth": (50, 500),
-    "currentLifetime": (1000, 20000),
-    "currentSpawnRate": (0.0001, 0.002),
-    "bloomSpawnRate": (0.00005, 0.001),
-    "bloomRadiusMin": (50, 200),
-    "bloomRadiusMax": (100, 400),
-    "bloomLifetimeMin": (500, 5000),
-    "bloomLifetimeMax": (1000, 10000),
-    "bloomIntensity": (0.5, 3.0),
-    "bloomMax": (0, 5),
-    "stormSpawnRate": (0.00002, 0.0005),
-    "stormRadiusMin": (40, 200),
-    "stormRadiusMax": (80, 400),
-    "stormLifetimeMin": (300, 3000),
-    "stormLifetimeMax": (500, 5000),
-    "stormIntensity": (0.5, 3.0),
-    "stormMax": (0, 3),
-    # Hue drift
-    "hueDriftRate": (0.0, 0.1),
-    "hueDriftBondForm": (0.0, 5.0),
-    "hueDriftBondBreak": (0.0, 5.0),
-    "hueDriftDisruption": (0.0, 2.0),
-    "hueDriftTravel": (0.0, 1.0),
-    # Size variance
-    "sizeGrowthDuration": (100, 3000),
-    "sizeBondScale": (0.0, 0.5),
-    # Parameter overhaul
-    "cabinFeverThreshold": (100, 2000),
-    "cabinFeverRate": (0.00005, 0.002),
-    "homeostasisRate": (0.0, 0.001),
-    "volatilityFloor": (0.0, 0.3),
-    "inertiaCeiling": (0.5, 1.0),
-    "bondAffinityCeiling": (0.5, 1.0),
-    "disruptionPostFireDrop": (0.05, 0.8),
-    "driftNoiseScale": (0.0, 0.01),
-    "noveltyThreshold": (200, 5000),
-    "noveltyBoost": (0.0, 0.1),
-    # Bond topology
-    "secondDegreeStrength": (0.0, 1.0),
-    "sharedNeighborBonus": (0.0, 0.5),
-    "secondDegreeMaxRange": (50, 400),
-    "introductionFactor": (0.0, 0.8),
-}
+def fetch_param_ranges() -> dict[str, dict] | None:
+    """Tunable parameters with their ranges and defaults, as published by the
+    Molequle server (single source of truth: client/js/params.js).
+
+    Returns None if the server doesn't publish them (older server); the
+    server still validates on POST /api/params.
+    """
+    try:
+        return api_get("/api/param-ranges").get("params")
+    except RuntimeError:
+        return None
 
 
 @mcp.tool()
@@ -538,6 +483,13 @@ def molequle_set_params(params: str) -> str:
       sharedNeighborBonus: 0.0-0.5 (default 0.12) -- bond strength bonus per shared neighbor per tick
       secondDegreeMaxRange: 50-400 (default 200) -- max pixel distance for second-degree pull
       introductionFactor: 0.0-0.8 (default 0.3) -- per-shared-neighbor reduction in bond formation time (mutual introduction)
+      bPassiveDecayRate: 0.0-0.001 (default 0.0001) -- B passive downward drift per tick
+      bPassiveRecoveryRate: 0.0-0.001 (default 0.0001) -- B passive upward recovery per tick (balances decay by default)
+      maxBondsPerEntity: 1-6, integer (default 3) -- bond degree cap per entity
+      overcrowdingBondThreshold: 1-10, integer (default 5) -- bond count above which B starts decreasing
+
+    The authoritative list comes from the server; unknown keys are rejected
+    with the current list of valid parameters.
 
     Args:
         params: JSON string of parameter names to values,
@@ -548,16 +500,21 @@ def molequle_set_params(params: str) -> str:
     except json.JSONDecodeError as e:
         return f"Error: Invalid JSON — {e}"
 
-    invalid = [k for k in param_dict if k not in VALID_PARAMS]
-    if invalid:
-        return (
-            f"Error: Unknown parameter(s): {', '.join(invalid)}.\n"
-            f"Valid parameters: {', '.join(VALID_PARAMS.keys())}"
-        )
+    ranges = fetch_param_ranges()
+    if ranges is not None:
+        invalid = [k for k in param_dict if k not in ranges]
+        if invalid:
+            return (
+                f"Error: Unknown parameter(s): {', '.join(invalid)}.\n"
+                f"Valid parameters: {', '.join(ranges.keys())}"
+            )
 
     result = api_post("/api/params", param_dict)
+    if result.get("errors"):
+        return f"Error: {'; '.join(result['errors'])}"
+    # Report what the server queued (values clamped to range, integers rounded)
     return (
-        f"Parameters queued: {json.dumps(param_dict)}\n"
+        f"Parameters queued: {json.dumps(result.get('applied', param_dict))}\n"
         f"{result.get('message', 'Will be applied on next client poll (~2s).')}"
     )
 
@@ -731,12 +688,18 @@ def molequle_get_weather_log(
 
 # ── Tool: List Saves ───────────────────────────────────────────────────
 
+SAVE_FILENAME_RE = re.compile(
+    r"^(?:(?P<prefix>auto|save)-)?state-(?P<ms>\d+)(?:-seed-(?P<seed>\w+))?\.json$"
+)
+
+
 @mcp.tool()
 def molequle_list_saves() -> str:
     """List all saved state files.
 
-    The simulation auto-saves every ~50 seconds. Returns filenames sorted
-    by most recent first.
+    The simulation auto-saves every ~50 seconds, and immediately when a new
+    run starts. Returns filenames with save time, world seed, and save type,
+    most recent first.
     """
     data = api_get("/api/saves")
     saves = data.get("saves", [])
@@ -744,17 +707,23 @@ def molequle_list_saves() -> str:
     if not saves:
         return "No saved states found."
 
+    # Filenames: {auto|save}-state-<ms>[-seed-<seed>].json (older: state-<ms>.json,
+    # and saves from before seeds were recorded have no -seed- part)
+    entries = []
+    for f in saves:
+        m = SAVE_FILENAME_RE.match(f)
+        if not m:
+            entries.append((0, f, "?", "?", "?"))
+            continue
+        kind = {"auto": "auto", "save": "manual"}.get(m.group("prefix") or "", "legacy")
+        ms = int(m.group("ms"))
+        ts = datetime.fromtimestamp(ms / 1000).strftime("%Y-%m-%d %H:%M:%S")
+        entries.append((ms, f, ts, m.group("seed") or "unknown", kind))
+    entries.sort(key=lambda e: e[0], reverse=True)
+
     lines = [f"# Saved States ({len(saves)})", ""]
-    for i, f in enumerate(saves, 1):
-        # Extract timestamp from filename like state-1710000000000.json
-        ts = ""
-        if f.startswith("state-") and f.endswith(".json"):
-            try:
-                ms = int(f[6:-5])
-                ts = datetime.fromtimestamp(ms / 1000).strftime("%Y-%m-%d %H:%M:%S")
-            except ValueError:
-                ts = "?"
-        lines.append(f"{i}. `{f}` — {ts}")
+    for i, (_, f, ts, seed, kind) in enumerate(entries, 1):
+        lines.append(f"{i}. `{f}` — {ts} — seed {seed} ({kind})")
 
     return "\n".join(lines)
 

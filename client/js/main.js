@@ -8,126 +8,7 @@ import { Renderer } from './renderer.js';
 import { EventSystem } from './events.js';
 import { UI } from './ui.js';
 import { WeatherSystem } from './weather.js';
-
-// ── Default configuration ──────────────────────────────────────────────
-
-const DEFAULT_CONFIG = {
-  canvasWidth: 1920,
-  canvasHeight: 1080,
-  initialPopulation: 120,
-  maxPopulation: 500,
-  ticksPerFrame: 1,
-
-  // Movement
-  perceptionRadius: 150,
-  maxSpeed: 4,
-  socialRadius: 120,
-
-  // Bonding
-  bondRadius: 40,
-  bondDuration: 60,
-  bondBreakDistance: 120,
-
-  // Disruption
-  disruptionThreshold: 0.6,
-  disruptionRadius: 80,
-  disruptionRegenCap: 0.8,  // must be >= disruptionThreshold so D can naturally fire
-
-  // Bond hardening
-  bondHardeningAge: 200,
-  bondHardeningResistance: 0.2,
-  bondRestDistance: 25,
-  bondedSociabilityFloor: 0.15,
-  bondedVolatilityFloor: 0.2,
-
-  // Reproduction
-  spawnThreshold: 5,
-  communityThreshold: 0.4,
-  spawnCooldown: 200,
-
-  // Death
-  lonelinessThreshold: 400,
-  crushThreshold: 12,
-  maxAge: 20000,
-
-  // Context map
-  halfLifeTicks: 5000,
-  gridCols: 96,
-  gridRows: 54,
-
-  // Hue drift — color becomes biography
-  hueDriftRate: 0.02,            // base per-tick hue accumulation
-  hueDriftBondForm: 0.5,         // hue bump on bond formation
-  hueDriftBondBreak: 1.0,        // hue bump on bond break
-  hueDriftDisruption: 0.3,       // per-tick hue drift in disruption zones
-  hueDriftTravel: 0.1,           // per-tick hue drift at high speed
-
-  // Size variance
-  sizeGrowthDuration: 600,       // ticks for newborn to reach full size
-  sizeBondScale: 0.1,            // size increase per active bond
-
-  // Trails
-  trailDecayRate: 0.003,
-  trailDecayScaling: true,       // scale trail decay with avg movement speed
-
-  // Parameter overhaul: floors, ceilings, counter-pressures
-  volatilityFloor: 0.1,          // universal V floor (most important single change)
-  inertiaCeiling: 0.85,          // hard I ceiling
-  bondAffinityCeiling: 0.95,     // hard B ceiling
-  disruptionPostFireDrop: 0.3,   // D drops by this after firing, not to 0
-  bPassiveDecayRate: 0.00005,    // B passive downward drift per tick
-  cabinFeverThreshold: 500,      // ticks of low S before restlessness kicks in
-  cabinFeverRate: 0.0003,        // S upward drift rate during cabin fever
-  homeostasisRate: 0.0001,       // drift rate back toward birth parameters
-  noveltyThreshold: 1000,        // ticks absent from a cell to trigger novelty boost
-  noveltyBoost: 0.03,            // V boost when entering novel region
-  overcrowdingBondThreshold: 5,  // bond count where B starts decreasing
-  driftNoiseScale: 0.001,        // per-tick random walk magnitude (scaled by V)
-
-  // Weather: Seasons
-  seasonLength: 12000,
-  seasonAmplitude: 0.5,
-
-  // Weather: Migration Currents
-  currentCount: 2,
-  currentStrength: 0.3,
-  currentWidth: 200,
-  currentLifetime: 5000,
-  currentSpawnRate: 0.0005,
-
-  // Weather: Fertility Blooms
-  bloomSpawnRate: 0.0002,
-  bloomRadiusMin: 100,
-  bloomRadiusMax: 250,
-  bloomLifetimeMin: 2000,
-  bloomLifetimeMax: 5000,
-  bloomIntensity: 1.5,
-  bloomMax: 3,
-
-  // Weather: Disruption Storms
-  stormSpawnRate: 0.00008,
-  stormRadiusMin: 80,
-  stormRadiusMax: 200,
-  stormLifetimeMin: 1000,
-  stormLifetimeMax: 3000,
-  stormIntensity: 1.5,
-  stormMax: 2,
-
-  // Bond topology: second-degree attraction & shared-neighbor reinforcement
-  secondDegreeStrength: 0.4,     // attraction force between 2-hop neighbors (0 = off)
-  sharedNeighborBonus: 0.12,     // bond strength bonus per shared neighbor per tick
-  secondDegreeMaxRange: 200,     // max distance for second-degree pull
-  introductionFactor: 0.3,      // per-shared-neighbor reduction in bond formation time
-
-  // Display toggles
-  showTrails: true,
-  showContextMap: false,
-  smoother: false,
-  paused: false,
-
-  // Current state (written by main loop for renderer/UI)
-  currentTick: 0
-};
+import { DEFAULT_CONFIG } from './params.js';
 
 // ── Global simulation state ────────────────────────────────────────────
 
@@ -310,8 +191,7 @@ async function init() {
       }
     },
     onNewRun: (newSeed) => {
-      seed = newSeed || Date.now();
-      resetSimulation();
+      startNewRun(newSeed || Date.now());
     },
     onReset: () => {
       resetSimulation();
@@ -357,6 +237,14 @@ function spawnInitialEntities() {
   }
 }
 
+// Start a fresh world with a new seed and save it right away, so a reload
+// before the first periodic autosave doesn't restore the previous world.
+function startNewRun(newSeed) {
+  seed = newSeed;
+  resetSimulation();
+  eventSystem.requestSave();
+}
+
 function resetSimulation() {
   rng = mulberry32(seed);
   tick = 0;
@@ -397,8 +285,7 @@ function handleKeyboard(e) {
       resetSimulation();
       break;
     case 'n':
-      seed = Date.now();
-      resetSimulation();
+      startNewRun(Date.now());
       break;
     case 'tab':
       e.preventDefault();
@@ -473,9 +360,10 @@ function simulationTick() {
   // ── Bond formation attempts ──
   // Seasonal + bloom modifiers affect bond formation probability via config overlay
   config._weatherBondModifier = seasonMods.bondFormationModifier;
+  const maxBonds = config.maxBondsPerEntity ?? 3;
   for (let i = 0; i < aliveEntities.length; i++) {
     const entityA = aliveEntities[i];
-    if (entityA.bonds.length >= 3) continue;
+    if (entityA.bonds.length >= maxBonds) continue;
 
     // Per-entity bloom modifier
     const bloomEffects = weatherSystem.getBloomEffectsAt(entityA.x, entityA.y, config);
@@ -484,7 +372,7 @@ function simulationTick() {
     const nearby = getNearbyEntities(entityA.x, entityA.y, config.bondRadius);
     for (const entityB of nearby) {
       if (entityB.id <= entityA.id || !entityB.alive) continue;
-      if (entityB.bonds.length >= 3) continue;
+      if (entityB.bonds.length >= maxBonds) continue;
 
       const bondEvent = entityA.tryFormBond(entityB, contextMap, config, rng, tick);
       if (bondEvent) {
@@ -675,8 +563,7 @@ async function pollServer() {
         resetSimulation();
         break;
       case 'new_run':
-        seed = control.seed || Date.now();
-        resetSimulation();
+        startNewRun(control.seed || Date.now());
         break;
       case 'smoother_on':
         config.smoother = true;

@@ -424,8 +424,10 @@ export class Entity {
     // The original flat -0.005 zeroed B in ~100 ticks. Now V-scaled and gentler.
     // Passive regen ensures B can never be permanently destroyed — wariness fades.
 
-    // Passive decay — always-on downward drift so B doesn't sit at 1.0
-    this.bondAffinity -= config.bPassiveDecayRate || 0.00005;
+    // Passive decay — always-on downward drift so B doesn't sit at the ceiling.
+    // Balanced against passive recovery below (both 0.0001 by default), so on
+    // their own they net to zero and B is driven by the contextual terms.
+    this.bondAffinity -= config.bPassiveDecayRate ?? 0.0001;
 
     for (const bond of this.bonds) {
       const bondAge = currentTick - bond.formedAt;
@@ -437,7 +439,7 @@ export class Entity {
       this.bondAffinity -= 0.0008 * V;
     }
     // Slow passive recovery — wariness heals, given time
-    this.bondAffinity += 0.0001;
+    this.bondAffinity += config.bPassiveRecoveryRate ?? 0.0001;
 
     // Overcrowding penalty: too many bonds spread you thin
     if (this.bonds.length > (config.overcrowdingBondThreshold || 5)) {
@@ -821,8 +823,9 @@ export class Entity {
       return null;
     }
 
-    // Check bond limits (max 3 each)
-    if (this.bonds.length >= 3 || other.bonds.length >= 3) return null;
+    // Check bond limits (degree cap applies to both)
+    const maxBonds = config.maxBondsPerEntity ?? 3;
+    if (this.bonds.length >= maxBonds || other.bonds.length >= maxBonds) return null;
 
     // Check not already bonded
     if (this.bonds.some(b => b.targetId === other.id)) return null;
