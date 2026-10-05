@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.0.1 — 2026-10-05
+
+Documentation only; no code changes from 2.0.0.
+
+- Made clear that the Claude Desktop extension (`.mcpb`) is **local only**: it
+  talks to the Molequle server from this project running on your machine and
+  does nothing on its own. Called out in the README Quick Start (get the whole
+  project first), the README extension section, and the extension's own
+  description shown in Claude Desktop.
+
 ## 2.0.0 — 2026-10-05
 
 **Visual update. 2.0 changes rendering only: simulation results are unchanged
