@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.0.2 — 2026-10-05
+
+**Simulation change: 2.0.2 worlds are not byte-identical to 2.0.1.** The same
+seed and config will grow a (slightly) different world from here on.
+
+### Fixed
+- **Bond affinity could go briefly negative.** The failed-proximity
+  discouragement in `tryFormBond()` subtracted 0.001 from both entities' bond
+  affinity *after* `update()` had already clamped it, so B could dip below 0
+  (about −0.01 to −0.02; lower when several neighbors discouraged an entity in
+  the same tick) until the next tick re-clamped it. It's now floored at 0. The
+  effect is tiny: reproduction's community check was averaging in slightly
+  negative values. Found by Orien Code (House of Threads).
+
 ## 2.0.1 — 2026-10-05
 
 Documentation only; no code changes from 2.0.0.

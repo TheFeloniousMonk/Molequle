@@ -892,10 +892,12 @@ export class Entity {
       };
     }
 
-    // Failed proximity discouragement: been near long enough but bond didn't form
+    // Failed proximity discouragement: been near long enough but bond didn't form.
+    // Floored at 0: update() has already clamped B this tick, so an unclamped
+    // subtraction would leave it briefly negative for the rest of the tick.
     if (this.proximityTicks[other.id] >= effectiveDuration) {
-      this.bondAffinity -= 0.001;
-      other.bondAffinity -= 0.001;
+      this.bondAffinity = Math.max(0, this.bondAffinity - 0.001);
+      other.bondAffinity = Math.max(0, other.bondAffinity - 0.001);
     }
 
     return null;

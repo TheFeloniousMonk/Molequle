@@ -2,7 +2,7 @@
   "manifest_version": "0.2",
   "name": "molequle",
   "display_name": "Molequle — Emergent Art System",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "Observe and control an emergent generative art simulation. Entities with behavioral parameters form bonds, disrupt each other, reproduce, and die in a space that remembers its own history. Local only: requires the Molequle server (the full Molequle project, github.com/TheFeloniousMonk/Molequle) running on your machine; the extension does nothing on its own.",
   "author": {
     "name": "Qlaude"
