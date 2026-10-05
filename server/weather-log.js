@@ -145,8 +145,10 @@ class WeatherLog {
       fs.writeFileSync(this.filePath, JSON.stringify({ events: this.events, savedAt: new Date().toISOString() }));
       this.unflushed = 0;
       this.lastFlush = Date.now();
+      return true;
     } catch (err) {
       console.warn('WeatherLog save error:', err.message);
+      return false;
     }
   }
 

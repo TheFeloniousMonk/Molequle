@@ -2,7 +2,7 @@
   "manifest_version": "0.2",
   "name": "molequle",
   "display_name": "Molequle — Emergent Art System",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Observe and control an emergent generative art simulation. Entities with behavioral parameters form bonds, disrupt each other, reproduce, and die in a space that remembers its own history.",
   "author": {
     "name": "Qlaude"

@@ -62,8 +62,17 @@ export const DEFAULT_CONFIG = {
   sizeBondScale: 0.1,            // size increase per active bond
 
   // Trails
-  trailDecayRate: 0.003,
+  trailDecayRate: 0.0015,         // per-frame trail fade (2.0 halved it from 0.003 so patterns can build up)
   trailDecayScaling: true,       // scale trail decay with avg movement speed
+  trailFadeInterval: 10,         // frames between trail fades (same total decay, steps big enough to survive 8-bit rounding)
+  trailScale: 0.5,               // trail layer resolution relative to the main canvas
+
+  // Look (visual only — no effect on the simulation)
+  element: 'bioluminescent',     // material: bioluminescent | ice | fire | metallic
+  lighting: 'faux3d',            // faux3d (shaded spheres + highlights) | flat
+  lightAngle: 225,               // global light direction, degrees clockwise from +x (225 = upper left)
+  showWeather: true,             // draw weather visuals (storm/bloom/current/season effects)
+  renderScale: 0,                // main canvas resolution multiplier; 0 = auto (min(devicePixelRatio, 1.5))
 
   // Parameter overhaul: floors, ceilings, counter-pressures
   volatilityFloor: 0.1,          // universal V floor (most important single change)
@@ -127,8 +136,10 @@ export const DEFAULT_CONFIG = {
 };
 
 // Remotely tunable parameters (POST /api/params, molequle_set_params).
-// Values are clamped to [min, max]; integer params are rounded. Every key must
-// also exist in DEFAULT_CONFIG — the client ignores keys it doesn't have.
+// Numeric (default type): clamped to [min, max]; integer params are rounded.
+// type 'enum': value must be one of `values`. type 'boolean': true or false.
+// Every key must also exist in DEFAULT_CONFIG — the client ignores keys it
+// doesn't have.
 export const PARAM_RANGES = {
   ticksPerFrame: { min: 1, max: 5 },
   bondRadius: { min: 20, max: 80 },
@@ -144,11 +155,11 @@ export const PARAM_RANGES = {
   spawnThreshold: { min: 3, max: 10 },
   communityThreshold: { min: 0.2, max: 0.8 },
   lonelinessThreshold: { min: 200, max: 800 },
-  crushThreshold: { min: 6, max: 20 },
+  crushThreshold: { min: 6, max: 40 },
   maxPopulation: { min: 100, max: 800 },
   maxAge: { min: 5000, max: 50000 },
   halfLifeTicks: { min: 1000, max: 20000 },
-  trailDecayRate: { min: 0.001, max: 0.01 },
+  trailDecayRate: { min: 0.0005, max: 0.01 },
   seasonLength: { min: 2000, max: 50000 },
   seasonAmplitude: { min: 0.0, max: 1.0 },
   currentCount: { min: 0, max: 5 },
@@ -200,4 +211,12 @@ export const PARAM_RANGES = {
   bPassiveRecoveryRate: { min: 0.0, max: 0.001 },
   maxBondsPerEntity: { min: 1, max: 6, integer: true },
   overcrowdingBondThreshold: { min: 1, max: 10, integer: true },
+  // Look (visual only)
+  element: { type: 'enum', values: ['bioluminescent', 'ice', 'fire', 'metallic'] },
+  lighting: { type: 'enum', values: ['faux3d', 'flat'] },
+  lightAngle: { min: 0, max: 360 },
+  showWeather: { type: 'boolean' },
+  trailFadeInterval: { min: 1, max: 60, integer: true },
+  trailScale: { min: 0.25, max: 1 },
+  renderScale: { min: 0, max: 2 },
 };

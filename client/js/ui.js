@@ -1,5 +1,7 @@
 // ui.js — Accordion-based control panel, mini-status header, parameter sliders, charts, toggles
 
+import { ELEMENTS, ELEMENT_NAMES } from './elements.js';
+
 export class UI {
   constructor(config, callbacks) {
     this.config = config;
@@ -240,7 +242,7 @@ export class UI {
       container.appendChild(this._sliderRow('Spawn Threshold', 'spawnThreshold', 3, 10, 1, 5));
       container.appendChild(this._sliderRow('Community Thresh', 'communityThreshold', 0.2, 0.8, 0.01, 0.4));
       container.appendChild(this._sliderRow('Loneliness Thresh', 'lonelinessThreshold', 200, 800, 10, 400));
-      container.appendChild(this._sliderRow('Crush Threshold', 'crushThreshold', 6, 20, 1, 12));
+      container.appendChild(this._sliderRow('Crush Threshold', 'crushThreshold', 6, 40, 1, 12));
       container.appendChild(this._sliderRow('Max Population', 'maxPopulation', 100, 800, 10, 500));
       container.appendChild(this._sliderRow('Max Age', 'maxAge', 5000, 50000, 500, 20000));
     });
@@ -289,7 +291,8 @@ export class UI {
 
   _buildVisualSection() {
     return this._createSection('VISUAL', false, (container) => {
-      container.appendChild(this._sliderRow('Trail Decay Rate', 'trailDecayRate', 0.001, 0.01, 0.001, 0.003));
+      container.appendChild(this._sliderRow('Trail Decay Rate', 'trailDecayRate', 0.0005, 0.01, 0.0005, 0.0015));
+      container.appendChild(this._sliderRow('Light Angle', 'lightAngle', 0, 360, 5, 225));
       container.appendChild(this._sliderRow('Context Map Half Life', 'halfLifeTicks', 1000, 20000, 100, 5000));
     });
   }
@@ -298,6 +301,12 @@ export class UI {
 
   _buildTogglesSection() {
     return this._createSection('TOGGLES', true, (container) => {
+      container.appendChild(this._segmentedRow('Element (E)', 'element',
+        ELEMENT_NAMES.map(name => ({ value: name, label: ELEMENTS[name].label }))));
+      container.appendChild(this._toggleRow('3D Lighting', 'lighting', this.config.lighting !== 'flat',
+        () => this.callbacks.onConfigChange('lighting', this.config.lighting === 'flat' ? 'faux3d' : 'flat'), 'faux3d'));
+      container.appendChild(this._toggleRow('Weather', 'showWeather', this.config.showWeather !== false,
+        () => this.callbacks.onConfigChange('showWeather', this.config.showWeather === false)));
       container.appendChild(this._toggleRow('The Smoother', 'smoother', this.config.smoother, () => this.callbacks.onToggleSmoother()));
       container.appendChild(this._toggleRow('Context Map (M)', 'showContextMap', this.config.showContextMap, () => this.callbacks.onToggleContextMap()));
       container.appendChild(this._toggleRow('Trails (T)', 'showTrails', this.config.showTrails, () => this.callbacks.onToggleTrails()));
@@ -350,7 +359,8 @@ export class UI {
 
   // ── Toggle row ─────────────────────────────────────────────────────
 
-  _toggleRow(label, key, initialState, callback) {
+  // `onValue`: for non-boolean keys, the config value that means "on"
+  _toggleRow(label, key, initialState, callback, onValue) {
     const row = document.createElement('div');
     row.className = 'toggle-row';
 
@@ -361,10 +371,42 @@ export class UI {
     const toggle = document.createElement('div');
     toggle.className = 'toggle-switch' + (initialState ? ' active' : '');
     toggle.dataset.key = key;
+    if (onValue !== undefined) toggle.dataset.on = onValue;
     toggle.addEventListener('click', () => {
       callback();
+      this.updateToggles(this.config);
     });
     row.appendChild(toggle);
+
+    return row;
+  }
+
+  // ── Segmented selector row ─────────────────────────────────────────
+
+  _segmentedRow(label, key, options) {
+    const row = document.createElement('div');
+    row.className = 'segmented-row';
+
+    const lbl = document.createElement('label');
+    lbl.textContent = label;
+    row.appendChild(lbl);
+
+    const group = document.createElement('div');
+    group.className = 'segmented';
+    group.dataset.key = key;
+    for (const opt of options) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = opt.label;
+      btn.dataset.value = opt.value;
+      if (this.config[key] === opt.value) btn.classList.add('active');
+      btn.addEventListener('click', () => {
+        this.callbacks.onConfigChange(key, opt.value);
+        this.updateToggles(this.config);
+      });
+      group.appendChild(btn);
+    }
+    row.appendChild(group);
 
     return row;
   }
@@ -592,10 +634,13 @@ export class UI {
     const toggles = document.querySelectorAll('.toggle-switch[data-key]');
     for (const toggle of toggles) {
       const key = toggle.dataset.key;
-      if (config[key]) {
-        toggle.classList.add('active');
-      } else {
-        toggle.classList.remove('active');
+      const on = toggle.dataset.on !== undefined ? config[key] === toggle.dataset.on : !!config[key];
+      toggle.classList.toggle('active', on);
+    }
+    const groups = document.querySelectorAll('.segmented[data-key]');
+    for (const group of groups) {
+      for (const btn of group.children) {
+        btn.classList.toggle('active', config[group.dataset.key] === btn.dataset.value);
       }
     }
   }

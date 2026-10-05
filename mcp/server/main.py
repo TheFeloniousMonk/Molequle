@@ -439,7 +439,7 @@ def molequle_set_params(params: str) -> str:
       maxPopulation: 100–800 (default 500)
       maxAge: 5000–50000 (default 20000)
       halfLifeTicks: 1000–20000 (default 5000)
-      trailDecayRate: 0.001–0.01 (default 0.003) — trail opacity decay per tick
+      trailDecayRate: 0.0005–0.01 (default 0.0015) — trail opacity decay per frame
       seasonLength: 2000-50000 (default 12000) -- ticks per full seasonal cycle
       seasonAmplitude: 0.0-1.0 (default 0.5) -- strength of seasonal effects
       currentCount: 0-5 (default 2) -- max simultaneous migration currents
@@ -487,6 +487,15 @@ def molequle_set_params(params: str) -> str:
       bPassiveRecoveryRate: 0.0-0.001 (default 0.0001) -- B passive upward recovery per tick (balances decay by default)
       maxBondsPerEntity: 1-6, integer (default 3) -- bond degree cap per entity
       overcrowdingBondThreshold: 1-10, integer (default 5) -- bond count above which B starts decreasing
+
+    Look (visual only — never changes the simulation):
+      element: "bioluminescent" | "ice" | "fire" | "metallic" (default "bioluminescent") -- entity material
+      lighting: "faux3d" | "flat" (default "faux3d") -- shaded spheres with highlights, or flat disks
+      lightAngle: 0-360 (default 225) -- light direction, degrees clockwise from +x (225 = upper left)
+      showWeather: true | false (default true) -- weather visuals (storms, blooms, currents, seasons)
+      trailFadeInterval: 1-60, integer (default 10) -- frames between trail fades
+      trailScale: 0.25-1.0 (default 0.5) -- trail layer resolution relative to the main canvas
+      renderScale: 0-2 (default 0 = auto: min(devicePixelRatio, 1.5)) -- main canvas resolution
 
     The authoritative list comes from the server; unknown keys are rejected
     with the current list of valid parameters.

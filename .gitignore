@@ -8,6 +8,7 @@ data/
 # Project root markdown (except README)
 /*.md
 !README.md
+!CHANGELOG.md
 
 # OS files
 .DS_Store

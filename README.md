@@ -4,6 +4,14 @@ Molequle — an emergent art system. Bioluminescent entities that bond, form fam
 
 Entities with continuous behavioral parameters move through a shared 1920x1080 canvas, form bonds, disrupt each other, reproduce, and die. The space accumulates a history of what's happened in it, and that history becomes a force that shapes future behavior. Color becomes biography — each entity's hue drifts over its lifetime based on what it's experienced.
 
+| Bioluminescent | Ice |
+|---|---|
+| ![Bioluminescent](docs/screenshots/bioluminescent.webp) | ![Ice](docs/screenshots/ice.webp) |
+| **Fire** | **Metallic** |
+| ![Fire](docs/screenshots/fire.webp) | ![Metallic](docs/screenshots/metallic.webp) |
+
+Close-ups: [bioluminescent](docs/screenshots/bioluminescent-detail.png) · [ice](docs/screenshots/ice-detail.png) · [fire](docs/screenshots/fire-detail.png) · [metallic](docs/screenshots/metallic-detail.png)
+
 ## Quick Start
 
 ```bash
@@ -13,6 +21,14 @@ npm start
 ```
 
 Open **http://localhost:3333** in your browser. The simulation starts automatically.
+
+## Updating
+
+1. Pull the latest code and restart the server (`Ctrl+C`, then `npm start` in `server/`). If the server isn't running in a terminal you can `Ctrl+C`, call `POST /api/flush` first so no trend history is lost.
+2. In Claude Desktop, uninstall the Molequle extension and reinstall it from the new `molequle.mcpb`.
+3. Hard-refresh the browser tab (`Ctrl+Shift+R` / `Cmd+Shift+R`) so it loads the new client code.
+
+See [CHANGELOG.md](CHANGELOG.md) for what changed.
 
 ## Controls
 
@@ -25,6 +41,7 @@ Open **http://localhost:3333** in your browser. The simulation starts automatica
 | S | Toggle The Smoother |
 | R | Reset (same seed) |
 | N | New run (random seed) |
+| E | Cycle element (bioluminescent → ice → fire → metallic) |
 
 ### UI Panel
 A mini-status bar in the header shows population, bonds, and current season at a glance. Click the gear icon to open the slide-out control panel, which contains collapsible accordion sections:
@@ -35,8 +52,8 @@ A mini-status bar in the header shows population, bonds, and current season at a
 - **Disruption** — disruption threshold, radius, regen cap
 - **Population** — spawn threshold, community/loneliness/crush thresholds, max population, max age
 - **Weather** — season length/amplitude, current/bloom/storm parameters
-- **Visual** — trail decay rate, context map half-life
-- **Toggles** — The Smoother, context map, trails, pause
+- **Visual** — trail decay rate, light angle, context map half-life
+- **Toggles** — element selector, 3D lighting, weather visuals, The Smoother, context map, trails, pause
 
 ## REST API
 
@@ -52,12 +69,14 @@ The server exposes a REST API for observing and controlling the simulation remot
 | `GET /api/config` | Current configuration values |
 | `GET /api/saves` | List of saved state files |
 | `GET /api/load` | Load most recent saved state |
+| `GET /api/param-ranges` | Tunable parameters with type, range or allowed values, and default |
 
 ### Write Endpoints
 | Endpoint | Description |
 |----------|-------------|
 | `POST /api/params` | Queue parameter changes (e.g., `{"maxPopulation": 300}`) |
 | `POST /api/control` | Send control commands (see below) |
+| `POST /api/flush` | Save trend history and the weather log to disk now (call before stopping the server) |
 
 ### Control Commands
 POST to `/api/control` with a JSON body:
@@ -90,9 +109,14 @@ The space is divided into a grid. Each cell tracks bond formations, bond breaks,
 - **Disruption zones** — volatile areas amplify chaos
 
 ### Visual Layer
+Rendering is visual only: the look can be changed at any time without affecting the simulation.
 - **Hue drift** — entities accumulate a color offset over their lifetime. Bond formation, bond loss, disruption exposure, and travel speed all shift an entity's hue. Two entities with identical parameters but different histories look different.
+- **Elements** — the material entities are made of: *bioluminescent* (the original full-spectrum glow), *ice* (glassy, translucent navy → cyan → white), *fire* (glowing crimson → amber → yellow-white), *metallic* (gunmetal → silver → pale gold, sharp highlights). An entity's hue picks its place on the element's color ramp; volatility drives glow size, disruption charge drives glow intensity and highlight brightness. Bonds and trails are tinted to match. Press **E** or use the panel to switch.
+- **Lighting** — faux-3D shading from one global light (`lightAngle`, default upper left): a highlight toward the light and a shadow crescent opposite. `lighting: "flat"` draws plain disks.
 - **Size variance** — bonded entities render slightly larger. Newborns grow in over their first ~10 seconds.
-- **Trails** — semi-transparent marks at each entity's position persist on a separate canvas, fading slowly. Family patrol patterns and migration routes become visible as warm underlayers.
+- **Trails** — each entity leaves a fading ribbon on a lower-resolution trail layer. Family patrol patterns and migration routes become visible as underlayers; quiet regions fade fully back to the background.
+- **Weather visuals** — storms dim and desaturate the entities inside them, with a cold rim and occasional lightning (plus frost sparkles, embers, or static sparks depending on the element); blooms are a warm upwelling glow; currents are drifting streaks; seasons shift a faint tint and vignette. Toggle with `showWeather`.
+- **Performance** — entities are drawn from pre-rendered sprites (no per-frame blur or gradients), and the main canvas resolution follows `renderScale` (default: the display's pixel ratio, capped at 1.5).
 
 ### Weather
 Seasonal cycles, migration currents, fertility blooms, and disruption storms add environmental pressure. Seasons modulate bond formation rates, movement speed, and disruption thresholds. Weather effects are tunable via the API.
@@ -132,7 +156,11 @@ npx @anthropic-ai/mcpb pack . ../molequle.mcpb
 The Molequle server must be running for the MCP tools to work.
 
 ## State Persistence
-The simulation auto-saves every ~50 seconds. On reload, it resumes from the last saved state. State files are stored in `server/data/`.
+The simulation auto-saves every ~50 seconds, and immediately when a new run starts. On reload, it resumes from the last saved state, including visual settings. State files are stored in `server/data/`; their names include the run's seed.
+
+Trend history (`trends.json`) and the weather log (`weather-log.json`) are saved every 5 minutes when they have new data, on `POST /api/flush`, and on a graceful shutdown (`Ctrl+C`).
+
+The same seed and config reproduce the same world within one JavaScript engine. Browsers can differ in the last bit of some math functions (`Math.sin`, `Math.log`, ...), and the simulation amplifies that, so the same seed can grow a different world in a different browser.
 
 ## Project Structure
 ```
@@ -149,7 +177,10 @@ emergent-system/
       params.js       Config defaults + tunable param ranges (shared with server)
       entity.js       Entity class with parameters and behavior
       context-map.js  Accumulated history grid
-      renderer.js     Canvas rendering (entities, trails, overlays)
+      renderer.js     Canvas rendering: frame composition, trails, bonds, entities
+      sprites.js      Pre-rendered entity sprite atlases (glow, lit body, highlight)
+      elements.js     Element materials: color ramps and lighting properties
+      weather-fx.js   Weather visuals (storm, bloom, current, season effects)
       events.js       Event logging and server communication
       ui.js           Control panel, sliders, charts
       weather.js      Seasonal cycles, currents, blooms, storms
@@ -160,6 +191,8 @@ emergent-system/
     requirements.txt
     lib/              Bundled Python dependencies
   molequle.mcpb       Packaged desktop extension
+  docs/screenshots/   Element screenshots
+  CHANGELOG.md
 ```
 
 ## License

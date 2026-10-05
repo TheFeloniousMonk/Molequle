@@ -133,11 +133,13 @@ class TrendStore {
     this.tier3 = new RingBuffer(Infinity);
     this.t1Counter = 0; // counts T1 pushes since last T2 rollup
     this.t2Counter = 0; // counts T2 pushes since last T3 rollup
+    this.unsaved = 0;   // pushes since the last successful save
   }
 
   push(rawMetrics) {
     const snapshot = normalizeSnapshot(rawMetrics);
     this.tier1.push(snapshot);
+    this.unsaved++;
     this.t1Counter++;
 
     if (this.t1Counter >= 20) {
@@ -198,8 +200,11 @@ class TrendStore {
         savedAt: new Date().toISOString(),
       };
       fs.writeFileSync(this.filePath, JSON.stringify(data));
+      this.unsaved = 0;
+      return true;
     } catch (err) {
       console.warn('TrendStore save error:', err.message);
+      return false;
     }
   }
 

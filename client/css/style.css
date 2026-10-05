@@ -197,10 +197,6 @@ body {
   }
 }
 
-#trail-canvas {
-  z-index: 1;
-}
-
 #main-canvas {
   z-index: 2;
 }
@@ -473,6 +469,50 @@ input[type="range"]::-moz-range-track {
   transform: translateX(12px);
   background: var(--accent-teal);
   box-shadow: 0 0 6px rgba(79, 209, 197, 0.35);
+}
+
+/* ── Segmented selector (element) ── */
+
+.segmented-row {
+  margin-bottom: 10px;
+}
+
+.segmented-row label {
+  display: block;
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.segmented {
+  display: flex;
+  gap: 4px;
+}
+
+.segmented button {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 2px;
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--slider-track);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: color 0.2s, background 0.2s, border-color 0.2s;
+}
+
+.segmented button:hover {
+  border-color: var(--border-hover);
+  color: var(--text-primary);
+}
+
+.segmented button.active {
+  color: var(--text-value);
+  background: rgba(79, 209, 197, 0.18);
+  border-color: rgba(79, 209, 197, 0.45);
 }
 
 /* ── Buttons ── */

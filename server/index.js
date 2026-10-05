@@ -146,7 +146,21 @@ app.post('/api/params', (req, res) => {
       errors.push(`Unknown param: ${key}`);
       continue;
     }
-    const num = Number(value);
+    if (range.type === 'enum') {
+      if (!range.values.includes(value)) {
+        errors.push(`${key}: must be one of ${range.values.join(', ')}`);
+        continue;
+      }
+      validated[key] = value;
+      continue;
+    }
+    if (range.type === 'boolean') {
+      if (value === true || value === 'true') validated[key] = true;
+      else if (value === false || value === 'false') validated[key] = false;
+      else errors.push(`${key}: must be true or false`);
+      continue;
+    }
+    const num = typeof value === 'boolean' ? NaN : Number(value);
     if (isNaN(num)) {
       errors.push(`${key}: not a number`);
       continue;
@@ -260,6 +274,30 @@ app.get('/api/weather-log', (req, res) => {
   const type = req.query.type || undefined;
   const last_n = req.query.last_n ? parseInt(req.query.last_n) : 50;
   res.json(weatherLog.query({ since, type, last_n }));
+});
+
+// ── Trend & weather persistence ───────────────────────────────────────
+// Both stores otherwise save only when enough new data arrives, so anything
+// since their last save is lost if the server is stopped without a graceful
+// shutdown (e.g. killed while no client is pushing). Save on a timer, and on
+// request before a restart.
+
+const PERSIST_INTERVAL_MS = Number(process.env.PERSIST_INTERVAL_MS) || 5 * 60 * 1000;
+
+function persistHistory() {
+  const saved = [];
+  const failed = [];
+  if (trendStore.unsaved > 0) (trendStore.save() ? saved : failed).push('trends');
+  if (weatherLog.unflushed > 0) (weatherLog.save() ? saved : failed).push('weatherLog');
+  return { saved, failed };
+}
+
+setInterval(persistHistory, PERSIST_INTERVAL_MS).unref();
+
+// Save trends and the weather log now (call before stopping the server)
+app.post('/api/flush', (req, res) => {
+  const { saved, failed } = persistHistory();
+  res.status(failed.length ? 500 : 200).json({ ok: failed.length === 0, saved, failed });
 });
 
 // ── Auto-save pruning ─────────────────────────────────────────────────

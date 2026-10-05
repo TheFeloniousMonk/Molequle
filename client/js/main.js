@@ -9,6 +9,7 @@ import { EventSystem } from './events.js';
 import { UI } from './ui.js';
 import { WeatherSystem } from './weather.js';
 import { DEFAULT_CONFIG } from './params.js';
+import { ELEMENT_NAMES } from './elements.js';
 
 // ── Global simulation state ────────────────────────────────────────────
 
@@ -137,10 +138,10 @@ function getCrushCandidates(entity) {
 
 async function init() {
   const mainCanvas = document.getElementById('main-canvas');
-  const trailCanvas = document.getElementById('trail-canvas');
 
   contextMap = new ContextMap(config.gridCols, config.gridRows, config.canvasWidth, config.canvasHeight);
-  renderer = new Renderer(mainCanvas, trailCanvas);
+  // ?dev in the URL samples trail-layer luminance into window.__molequleDev
+  renderer = new Renderer(mainCanvas, { dev: new URLSearchParams(location.search).has('dev') });
   eventSystem = new EventSystem();
   // Read module state at call time — resetSimulation() reassigns these
   eventSystem.setStateProvider(() => ({
@@ -161,6 +162,10 @@ async function init() {
     tick = savedState.tick || 0;
     config = { ...DEFAULT_CONFIG, ...(savedState.config || {}) };
     config.smoother = savedState.smoother || false;
+    // 2.0 halved the default trail decay (visual only). Saves store the full
+    // config, so worlds saved with the old default would never pick up the new
+    // one; custom values are left alone.
+    if (config.trailDecayRate === 0.003) config.trailDecayRate = DEFAULT_CONFIG.trailDecayRate;
 
     entities = savedState.entities.map(d => Entity.deserialize(d));
 
@@ -281,6 +286,13 @@ function handleKeyboard(e) {
       config.smoother = !config.smoother;
       if (ui) ui.updateToggles(config);
       break;
+    case 'e': {
+      // Cycle element (visual only)
+      const i = ELEMENT_NAMES.indexOf(config.element);
+      config.element = ELEMENT_NAMES[(i + 1) % ELEMENT_NAMES.length];
+      if (ui) ui.syncFromConfig(config);
+      break;
+    }
     case 'r':
       resetSimulation();
       break;
