@@ -161,6 +161,12 @@ npx @anthropic-ai/mcpb pack . ../molequle.mcpb
 
 The Molequle server must be running for the MCP tools to work.
 
+## ChatGPT Desktop (Community Plugin)
+
+ChatGPT users can connect through [molequle-chatgpt](https://github.com/Anonymous-Therapist/molequle-chatgpt), a community-contributed plugin by [@Anonymous-Therapist](https://github.com/Anonymous-Therapist). It packages Molequle's Python MCP bridge as a local ChatGPT Desktop/Codex plugin with the same observe-and-control tools. Like the Claude extension, it's local only: run this project and keep the simulation open in your browser. See that repo for install steps.
+
+It's maintained separately from Molequle, so please report issues with it on its own repo.
+
 ## State Persistence
 The simulation auto-saves every ~50 seconds, and immediately when a new run starts. On reload, it resumes from the last saved state, including visual settings. State files are stored in `server/data/`; their names include the run's seed.
 
