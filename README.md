@@ -14,8 +14,11 @@ Close-ups: [bioluminescent](docs/screenshots/bioluminescent-detail.png) · [ice]
 
 ## Quick Start
 
+Molequle runs entirely on your own machine: a small Node server plus the simulation in your browser. You need the whole project — clone it, or download **Source code (zip)** from the [latest release](https://github.com/TheFeloniousMonk/Molequle/releases/latest) and unzip it.
+
 ```bash
-cd server
+git clone https://github.com/TheFeloniousMonk/Molequle.git
+cd Molequle/server
 npm install
 npm start
 ```
@@ -128,9 +131,12 @@ A toggleable rule that suppresses high-variance behavior. Disruption trends towa
 
 A desktop extension lets Claude Desktop observe and control the simulation directly.
 
+> **Local only.** The extension is a companion to the Molequle app, not a standalone or remote MCP server. It talks to the Molequle server from this project running on your machine (default `http://localhost:3333`), and does nothing on its own. Set up the project first ([Quick Start](#quick-start)), start the server, and open the simulation in your browser.
+
 ### Install
 
-Double-click `molequle.mcpb` (in the project root) to install in Claude Desktop. It will prompt for the server URL (default: `http://localhost:3333`).
+1. Follow the [Quick Start](#quick-start) and keep the server running.
+2. Double-click `molequle.mcpb` (in the project root, or attached to the [latest release](https://github.com/TheFeloniousMonk/Molequle/releases/latest)) to install in Claude Desktop. It will prompt for the server URL (default: `http://localhost:3333`).
 
 ### Rebuild from Source
 
