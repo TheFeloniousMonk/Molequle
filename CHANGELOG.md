@@ -1,5 +1,30 @@
 # Changelog
 
+## 2.0.4 — 2026-10-13
+
+No simulation change; simulation results are byte-identical to 2.0.3.
+
+### Added
+- **Run header.** Every state push and save now records the physics version
+  (1), math mode, seed, and the runtime and platform the world ran on.
+  `molequle_get_state` prints it as one line; include it when you share a
+  seed. Groundwork for deterministic physics: the Seed Exchange found that
+  seed 23 grows different worlds on Node 22 and Node 24, because one
+  `Math.pow` call differs by one ulp at tick 3183.
+
+### Fixed
+- **`molequle_get_trends` now returns the series, not just the latest
+  entry.** Each tier keeps its "Latest" summary and adds a table, one row per
+  entry: tick, population, bonds, disruptions, and mean S/I/V/B/D. It
+  respects `since` and `last_n`. If the full series would exceed the response
+  limit, rows are sampled evenly across the tier instead of cutting off the
+  end.
+- **Trend entries recorded season `''` and warmth `0`.** The client reported
+  warmth as `seasonPhase` and no season name, so the trend store never got
+  either. It now gets both. Entries recorded before this update can't be
+  backfilled, so the trend output leaves out the season line for them instead
+  of showing zeros.
+
 ## 2.0.3 — 2026-10-05
 
 Visual only; simulation results are byte-identical to 2.0.2.

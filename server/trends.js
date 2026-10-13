@@ -89,7 +89,8 @@ function normalizeSnapshot(raw) {
     scarred_cells: raw.scarredCount || 0,
     ghost_cells: raw.ghostCount || 0,
     season: season.name || raw.season || '',
-    warmth: season.warmth != null ? season.warmth : (raw.warmth || 0),
+    // The client reports warmth as seasonPhase (0 = deep winter, 1 = peak summer)
+    warmth: season.warmth != null ? season.warmth : (raw.seasonPhase ?? raw.warmth ?? 0),
     active_blooms: raw.activeBlooms != null ? raw.activeBlooms : (weather.blooms ? weather.blooms.length : 0),
     active_storms: raw.activeStorms != null ? raw.activeStorms : (weather.storms ? weather.storms.length : 0),
     active_currents: raw.activeCurrents != null ? raw.activeCurrents : (weather.currents ? weather.currents.length : 0),

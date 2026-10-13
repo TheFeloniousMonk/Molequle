@@ -174,6 +174,8 @@ Trend history (`trends.json`) and the weather log (`weather-log.json`) are saved
 
 The same seed and config reproduce the same world within one JavaScript engine. Browsers can differ in the last bit of some math functions (`Math.sin`, `Math.log`, ...), and the simulation amplifies that, so the same seed can grow a different world in a different browser.
 
+Every state push and save carries a **run header**: physics version, math mode, seed, and the runtime and platform the world ran on. `molequle_get_state` prints it as one line. When you share a seed, include that line, so anyone who gets a different world can tell whether the runtimes differ.
+
 ## Project Structure
 ```
 emergent-system/
@@ -197,6 +199,7 @@ emergent-system/
       ui.js           Control panel, sliders, charts
       weather.js      Seasonal cycles, currents, blooms, storms
       prng.js         Seeded random number generator
+      runheader.js    Run header: physics version and runtime, recorded with every push/save
   mcp/
     manifest.json     MCPB extension manifest
     server/main.py    Python MCP server (FastMCP)

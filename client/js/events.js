@@ -1,6 +1,8 @@
 // EventSystem — bridge between browser simulation and Node/Express server
 // Handles event logging, batching, metrics, state snapshots, save/load, and polling
 
+import { buildRunHeader } from './runheader.js';
+
 // Deferred serialization: bulky per-entity values (hundreds of keys each) are
 // replaced by markers in the snapshot JSON, stringified a few at a time in
 // later idle slices, and assembled into the request body as a Blob. (A
@@ -280,6 +282,7 @@ export class EventSystem {
       ghostCount,
       // Weather metrics
       seasonPhase: weatherSystem ? weatherSystem.getWarmth() : null,
+      season: weatherSystem ? weatherSystem.getSeasonName() : '',
       activeBlooms: weatherSystem ? weatherSystem.blooms.length : 0,
       activeStorms: weatherSystem ? weatherSystem.storms.length : 0,
       activeCurrents: weatherSystem ? weatherSystem.currents.length : 0,
@@ -390,6 +393,7 @@ export class EventSystem {
   _buildStatePayload(state, serializedEntities) {
     const { entities, contextMap, config, tick, seed, smoother, startTime, weatherSystem } = state;
     const payload = {
+      runHeader: buildRunHeader(seed),
       tick,
       seed,
       config,

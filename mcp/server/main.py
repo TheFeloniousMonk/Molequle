@@ -160,11 +160,22 @@ def molequle_get_state(detail: str = "summary") -> str:
     for key in param_keys:
         lines.append(f"| {key} | {avgs[key]} |")
 
+    header = state.get("runHeader")
+    if header:
+        lines.append("")
+        lines.append(f"Run header: {format_run_header(header)}")
+
     received = state.get("receivedAt")
     if received:
         lines.append(f"\nLast updated: {datetime.fromtimestamp(received / 1000).strftime('%H:%M:%S')}")
 
     return "\n".join(lines)
+
+
+def format_run_header(header: dict) -> str:
+    """One line identifying the physics and runtime a world ran on (for seed sharing)."""
+    parts = [f"{k}={header[k]}" for k in header if header[k] not in ("", None)]
+    return ", ".join(parts)
 
 
 # ── Tool: Get Events ────────────────────────────────────────────────────
@@ -577,6 +588,11 @@ def molequle_get_trends(
     mean/std of all 5 behavioral parameters (S/I/V/B/D), context map cell
     counts, season info, active weather counts, bond density, avg entity age.
 
+    Output: per tier, a summary of the latest entry, then a table with one row
+    per entry (tick, population, bonds, disruptions, mean S/I/V/B/D). If the
+    full series would exceed the response limit, rows are sampled evenly across
+    the tier; use since/last_n to get full resolution for a narrower window.
+
     Args:
         tier: Which tier(s) to return — '1', '2', '3', or 'all' (default: 'all').
         since: Only return entries after this tick number (optional).
@@ -592,46 +608,116 @@ def molequle_get_trends(
 
     data = api_get("/api/trends", params=params)
 
-    lines = ["# Molequle Trends", ""]
+    tier_names = {"1": "Recent (300-tick)", "2": "Hours (6k-tick)", "3": "History (72k-tick)"}
+    table_header = ("| Tick | Pop | Bonds | Disr | S | I | V | B | D |\n"
+                    "|---|---|---|---|---|---|---|---|---|")
 
+    # Per tier: summary lines, then table rows (thinned later if over the limit)
+    sections: list[tuple[list[str], list[str]]] = []
     for tier_key in ["tier1", "tier2", "tier3"]:
         entries = data.get(tier_key)
         if entries is None:
             continue
         tier_num = tier_key[-1]
-        tier_names = {"1": "Recent (300-tick)", "2": "Hours (6k-tick)", "3": "History (72k-tick)"}
-        lines.append(f"## Tier {tier_num} — {tier_names[tier_num]}")
-        lines.append(f"Entries: {len(entries)}")
+        head = [f"## Tier {tier_num} — {tier_names[tier_num]}", f"Entries: {len(entries)}"]
+        rows: list[str] = []
 
         if entries:
             first = entries[0]
             last = entries[-1]
-            lines.append(f"Range: tick {first.get('tick', '?')} → {last.get('tick', '?')}")
-            lines.append("")
+            head.append(f"Range: tick {first.get('tick', '?')} → {last.get('tick', '?')}")
+            head.append("")
 
             # Show latest entry summary
             e = last
-            lines.append(f"**Latest** (tick {e.get('tick')}):")
-            lines.append(f"  Pop: {e.get('population', 0)} | Bonds: {e.get('bonds', 0)} | "
-                         f"Births: {e.get('births', 0)} | Deaths: {e.get('deaths', 0)} | "
-                         f"Disruptions: {e.get('disruptions', 0)}")
-            lines.append(f"  S={e.get('mean_S', 0):.3f} I={e.get('mean_I', 0):.3f} "
-                         f"V={e.get('mean_V', 0):.3f} B={e.get('mean_B', 0):.3f} "
-                         f"D={e.get('mean_D', 0):.3f}")
-            lines.append(f"  Season: {e.get('season', '?')} (warmth {e.get('warmth', 0):.2f})")
-            lines.append(f"  Blooms: {e.get('active_blooms', 0)} | "
-                         f"Storms: {e.get('active_storms', 0)} | "
-                         f"Currents: {e.get('active_currents', 0)}")
+            head.append(f"**Latest** (tick {e.get('tick')}):")
+            head.append(f"  Pop: {_trend_num(e.get('population'))} | Bonds: {_trend_num(e.get('bonds'))} | "
+                        f"Births: {_trend_num(e.get('births'))} | Deaths: {_trend_num(e.get('deaths'))} | "
+                        f"Disruptions: {_trend_num(e.get('disruptions'))}")
+            head.append(f"  S={e.get('mean_S', 0):.3f} I={e.get('mean_I', 0):.3f} "
+                        f"V={e.get('mean_V', 0):.3f} B={e.get('mean_B', 0):.3f} "
+                        f"D={e.get('mean_D', 0):.3f}")
+            # Entries recorded before the client reported season carry '' / 0; omit rather than show zeros
+            if e.get("season"):
+                head.append(f"  Season: {e['season']} (warmth {e.get('warmth', 0):.2f})")
+            head.append(f"  Blooms: {_trend_num(e.get('active_blooms'))} | "
+                        f"Storms: {_trend_num(e.get('active_storms'))} | "
+                        f"Currents: {_trend_num(e.get('active_currents'))}")
 
             # Population trend across this tier
             pops = [x.get("population", 0) for x in entries]
-            lines.append(f"  Pop range: {min(pops)}–{max(pops)}")
+            head.append(f"  Pop range: {_trend_num(min(pops))}–{_trend_num(max(pops))}")
+
+            rows = [
+                f"| {x.get('tick', '?')} | {_trend_num(x.get('population'))} | "
+                f"{_trend_num(x.get('bonds'))} | {_trend_num(x.get('disruptions'))} | "
+                f"{x.get('mean_S', 0):.3f} | {x.get('mean_I', 0):.3f} | {x.get('mean_V', 0):.3f} | "
+                f"{x.get('mean_B', 0):.3f} | {x.get('mean_D', 0):.3f} |"
+                for x in entries
+            ]
+        sections.append((head, rows))
+
+    # Fit under CHARACTER_LIMIT by capping rows per tier (largest cap that fits),
+    # sampling evenly across each tier so the series keeps its full span.
+    note_reserve = 80 * len(sections)
+    fixed = len("# Molequle Trends\n\n") + note_reserve + sum(
+        len("\n".join(head)) + len(table_header) + 8 for head, _ in sections
+    )
+    budget = CHARACTER_LIMIT - fixed
+
+    def cost(cap: int) -> int:
+        return sum(
+            min(len(rows), cap) * (max((len(r) for r in rows), default=0) + 1)
+            for _, rows in sections
+        )
+
+    max_rows = max((len(rows) for _, rows in sections), default=0)
+    cap = max_rows
+    if cost(cap) > budget:
+        lo, hi = 0, max_rows
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            if cost(mid) <= budget:
+                lo = mid
+            else:
+                hi = mid - 1
+        cap = lo
+
+    lines = ["# Molequle Trends", ""]
+    for head, rows in sections:
+        lines.extend(head)
+        if rows:
+            shown = _thin_evenly(rows, cap)
+            lines.append("")
+            if len(shown) < len(rows):
+                lines.append(f"Showing {len(shown)} of {len(rows)} rows, evenly sampled "
+                             f"(narrow with since/last_n for full resolution).")
+            lines.append(table_header)
+            lines.extend(shown)
         lines.append("")
 
-    text = "\n".join(lines)
-    if len(text) > CHARACTER_LIMIT:
-        text = text[:CHARACTER_LIMIT] + "\n\n... truncated"
-    return text
+    return "\n".join(lines)
+
+
+def _trend_num(v: Any) -> str:
+    """Format a trend value: integers as-is, rollup averages to one decimal."""
+    if v is None:
+        return "0"
+    if isinstance(v, float) and not v.is_integer():
+        return f"{v:.1f}"
+    return str(int(v))
+
+
+def _thin_evenly(items: list[str], k: int) -> list[str]:
+    """Pick k items evenly spaced across the list, always keeping the last."""
+    n = len(items)
+    if k >= n:
+        return items
+    if k <= 0:
+        return []
+    if k == 1:
+        return [items[-1]]
+    return [items[round(i * (n - 1) / (k - 1))] for i in range(k)]
 
 
 # ── Tool: Get Weather Log ─────────────────────────────────────────────
