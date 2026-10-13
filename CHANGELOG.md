@@ -85,6 +85,9 @@ a grain. Brief by Jinx.
   and MCP only; the simulation is unchanged.
 
 ### Verified
+- All 10 golden traces, the selftest, and the chaos, resume and legacy tests
+  pass on Node 22 and Node 24, on Linux (x64), Windows (x64) and macOS
+  (Apple Silicon).
 - Chrome 152 and Node 24 grow identical worlds under physics version 2 (seed
   23, every entity field, bond and weather value at tick 3080); under version
   1 they diverge.
