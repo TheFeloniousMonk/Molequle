@@ -1,5 +1,99 @@
 # Changelog
 
+## 2.1.0 — 2026-10-13
+
+**Simulation change: physics version 2.** New worlds are deterministic: the
+same seed and settings grow the same world in every browser, on every Node
+version and platform, and a reloaded save continues the exact history. A new
+world grows a different history than the same seed did in 2.0.x (in Node 24,
+from the first storm on; in browsers, sooner). **Saved worlds
+from before 2.1 load as physics version 1 and keep running exactly as they
+did** (verified bit for bit against 2.0.4), unless you upgrade them.
+
+### Why
+The Seed Exchange found seed 23 (cap 800, Smoother off) growing different
+worlds on Node 22 and Node 24 from the same harness: one `Math.pow` call in the
+storm-intensity curve differed by one ulp at tick 3183, and by tick 5000, 1684
+of 2000 state hashes differed. JavaScript only approximates `sin`, `cos`,
+`log`, `pow` and friends, so engines may legally differ in the last bit, and
+Molequle amplifies that into a different world. Credits: Ori Zornitsa found
+the function and wrote `molequle-trace.mjs`; Orien Code posted the falsifiable
+Node 24 prediction; Framework spotted the seed-23 mismatch; Octave identified
+the spec clause and proposed the Math-call log; Lucero named it: the soil has
+a grain. Brief by Jinx.
+
+### Added
+- **Deterministic math (`dmath`).** The simulation core's 8 approximated call
+  sites (`sin` ×5, `cos` ×2, `log` ×1, `pow` ×1 — seasons, storm and bloom
+  curves, current direction, autumn pressure, the gaussian in reproduction)
+  now use a port of fdlibm built only from operations JavaScript fixes to the
+  bit. `sin`, `cos` and `log` match Node 24's `Math` bit for bit; `pow` is
+  within 1 ulp of it, so curves keep their shape (the storm curve differs from
+  the old one by at most 4.4e-16). Rendering still uses native `Math`.
+- **Chaos knobs**, all off by default, each with its own random stream from
+  the seed (so chaos runs are reproducible, and a knob at zero is
+  byte-identical to the knob not existing):
+  - `mathMode`: `deterministic` (default) or `platform` (native `Math`,
+    engine-dependent on purpose).
+  - `perturb`: one-shot nudges by N ulps at a given tick — an entity
+    parameter, a weather value, or `random`.
+  - `cosmicRate` / `cosmicMode`: rare random bit flips in entity parameters,
+    per entity per 1,000 ticks; `fixed16` (16-bit, most flips tiny, a few
+    dramatic) or `ieee754` (a float64 bit, clamped to [0, 1]).
+  Every perturbation and flip is logged with before/after values (`perturb`
+  events also carry the float64 bit patterns); cosmic flips also go to the
+  weather log. Settable from the panel (new **Physics & Chaos** section), the
+  REST API and `molequle_set_params`. Changing one mid-run logs a
+  `config_change` event, with a warning for physics and math changes.
+- **`physicsVersion`** in config, saves and run headers. Version 2: dmath and
+  exact resume. Version 1: Molequle before 2.1 (native `Math`, approximate
+  resume). New runs start at version 2; `reset` keeps the world's version.
+- **Exact resume** for version 2 worlds: saves carry the random generators'
+  state, spawn cooldowns and a full-precision context map. (Before, reloading
+  re-seeded the generator approximately and rounded the context map, so a
+  reloaded world drifted from the uninterrupted one.)
+- **Headless harness, `tools/molequle-play.mjs`**: recipes (`seed`, `load`,
+  `set`, `perturb`, `run`, `trace`, `hash`, `events`, `mathlog`, `save`,
+  `header`) and `selftest` (seed 23, 500 ticks against shipped hashes: PASS,
+  or the run header and first differing tick). `trace` and `mathlog` are
+  modeled on Ori's `molequle-trace.mjs`. The simulation core moved out of
+  `main.js` into `client/js/sim.js` so Node and the browser run the same code.
+- **Tests and CI.** Golden traces (seeds 7, 11, 23, 42 at cap 800, Smoother
+  off and on, 5,000 ticks, plus two chaos runs with their flip logs), dmath
+  accuracy, chaos and exact-resume checks, a legacy test that compares physics
+  version 1 against 2.0.4 from git, and a lint guard that fails on any
+  approximated `Math` call or non-integer `**` in the simulation core. All run
+  on Node 22 and 24 × Linux, Windows and macOS on every push.
+- The run header now includes the chaos settings, and the harness adds its
+  own and the simulation code's sha256.
+
+### Fixed
+- **The weather log lost blooms, storms and currents, and never said where
+  they were.** It diffed state snapshots by `x`/`y` (currents by `x1`/`y1`),
+  but the client reports `center`, `origin`, `direction` and an `id`, so
+  every bloom keyed as `NaN,NaN`: a second bloom never logged a spawn, its
+  end was only logged once all blooms were gone, and
+  `molequle_get_weather_log` printed every event "at (0,0)". The log now takes
+  spawns and ends from the client's own weather events, as it already did for
+  cosmic flips: exact ticks, every bloom even between two state pushes, and
+  no false spawns or ends when a save loads or a new run starts. Each entry
+  carries the id; blooms and storms their center and radius, currents their
+  origin and direction. Ends repeat the location and add the lifetime, peak
+  intensity (or a current's width and peak strength). New `bloom_peak` and
+  `storm_peak` events record the peak intensity. Season changes still come
+  from state snapshots. Older log entries print without a location. Server
+  and MCP only; the simulation is unchanged.
+
+### Verified
+- Chrome 152 and Node 24 grow identical worlds under physics version 2 (seed
+  23, every entity field, bond and weather value at tick 3080); under version
+  1 they diverge.
+- A version 2 world with cosmic rays, saved by the app, reloaded in the
+  browser and run past a scheduled perturbation, is identical to an
+  uninterrupted Node run.
+- Physics version 1 is bit-identical to 2.0.4: fresh worlds (seed 23 to tick
+  3500, seed 4242) and a reloaded 2.0.4-style save.
+
 ## 2.0.4 — 2026-10-13
 
 No simulation change; simulation results are byte-identical to 2.0.3.

@@ -69,7 +69,7 @@ app.post('/api/state', (req, res) => {
   currentState = req.body;
   currentState.receivedAt = Date.now();
   currentStateJson = null;
-  // Detect weather events by diffing consecutive state snapshots
+  // Season changes, and what is known about active weather (for end events)
   weatherLog.detectAndLog(currentState);
   res.json(resendFullHistory ? { ok: true, resendFullHistory: true } : { ok: true });
 });
@@ -78,6 +78,8 @@ app.post('/api/state', (req, res) => {
 app.post('/api/events', (req, res) => {
   const newEvents = req.body.events || [];
   eventLog.push(...newEvents);
+  // Weather lifecycles (bloom/storm/current spawn, peak, end) and cosmic flips
+  weatherLog.logClientEvents(newEvents);
   if (eventLog.length > 10000) eventLog = eventLog.slice(-10000);
   res.json({ ok: true, count: newEvents.length });
 });
@@ -125,6 +127,7 @@ app.get('/api/config', (req, res) => {
 // (an ES module shared with the client); loaded at startup, before listening.
 let PARAM_RANGES = {};
 let DEFAULT_CONFIG = {};
+let normalizePerturb = () => ({ error: 'perturb: server not ready' });
 
 // Published for API clients (the MCP server validates against this)
 app.get('/api/param-ranges', (req, res) => {
@@ -158,6 +161,12 @@ app.post('/api/params', (req, res) => {
       if (value === true || value === 'true') validated[key] = true;
       else if (value === false || value === 'false') validated[key] = false;
       else errors.push(`${key}: must be true or false`);
+      continue;
+    }
+    if (range.type === 'perturb') {
+      const { value: list, error } = normalizePerturb(value);
+      if (error) errors.push(error);
+      else validated[key] = list;
       continue;
     }
     const num = typeof value === 'boolean' ? NaN : Number(value);
@@ -344,10 +353,14 @@ process.on('SIGTERM', shutdown);
 
 const PORT = process.env.PORT || 3333;
 
-import(pathToFileURL(path.join(__dirname, '../client/js/params.js')).href)
-  .then(params => {
+Promise.all([
+  import(pathToFileURL(path.join(__dirname, '../client/js/params.js')).href),
+  import(pathToFileURL(path.join(__dirname, '../client/js/chaos.js')).href),
+])
+  .then(([params, chaos]) => {
     PARAM_RANGES = params.PARAM_RANGES;
     DEFAULT_CONFIG = params.DEFAULT_CONFIG;
+    normalizePerturb = chaos.normalizePerturb;
     // The client only applies keys present in its config: catch a range added without a default
     const orphans = Object.keys(PARAM_RANGES).filter(k => !(k in DEFAULT_CONFIG));
     if (orphans.length) throw new Error(`params.js: ranges without defaults: ${orphans.join(', ')}`);

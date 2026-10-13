@@ -13,6 +13,13 @@ const DEFERRED_PER_STEP = 4;   // deferred values stringified between time check
 const DEFERRED_PER_BLOB = 32;  // values per intermediate Blob (each Blob has fixed overhead)
 const SLICE_MS = 4;            // work budget per slice when not given an idle deadline
 
+// A deferred value that was already stringified (spliced into the body as-is)
+class RawJSON {
+  constructor(text) {
+    this.text = text;
+  }
+}
+
 export class EventSystem {
   constructor() {
     this.eventBuffer = [];
@@ -154,7 +161,8 @@ export class EventSystem {
       const marker = '"' + DEFERRED_MARKER + i + '__"';
       const at = json.indexOf(marker, pos);
       if (at < 0) throw new Error(`EventSystem: deferred marker ${i} missing`);
-      group.push(json.slice(pos, at), JSON.stringify(deferred[i]) ?? 'null');
+      const value = deferred[i];
+      group.push(json.slice(pos, at), value instanceof RawJSON ? value.text : (JSON.stringify(value) ?? 'null'));
       pos = at + marker.length;
       if (i % DEFERRED_PER_BLOB === DEFERRED_PER_BLOB - 1) {
         blobs.push(new Blob(group));
@@ -306,14 +314,20 @@ export class EventSystem {
     // Step 1 — atomic snapshot; the bulky per-entity values are stringified
     // in later steps. parameterHistory is copied (cheap: shared entry objects)
     // so the saved history can't run ahead of the saved tick.
+    // Physics version 2 saves resume exactly, so cellAbsenceTicks (which the
+    // simulation keeps changing) is stringified now, at the saved tick: about
+    // 15 ms at 800 entities, once per autosave. Version 1 worlds resume
+    // approximately anyway and keep deferring it.
+    const exact = (state.config.physicsVersion ?? 1) >= 2;
     const deferred = [];
     const entities = state.entities.map(e => {
       const data = e.serialize();
       data.parameterHistory = this._defer(deferred, data.parameterHistory.slice());
-      data.cellAbsenceTicks = this._defer(deferred, data.cellAbsenceTicks);
+      data.cellAbsenceTicks = this._defer(deferred, exact ? new RawJSON(JSON.stringify(data.cellAbsenceTicks)) : data.cellAbsenceTicks);
       return data;
     });
     const payload = this._buildStatePayload(state, entities);
+    if (exact && state.exactState) payload.exact = state.exactState();
     payload._saveType = manual ? 'manual' : 'auto';
     const snapshot = JSON.stringify(payload);
     yield;
@@ -393,7 +407,7 @@ export class EventSystem {
   _buildStatePayload(state, serializedEntities) {
     const { entities, contextMap, config, tick, seed, smoother, startTime, weatherSystem } = state;
     const payload = {
-      runHeader: buildRunHeader(seed),
+      runHeader: buildRunHeader(seed, config),
       tick,
       seed,
       config,

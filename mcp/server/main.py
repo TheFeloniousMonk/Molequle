@@ -174,7 +174,11 @@ def molequle_get_state(detail: str = "summary") -> str:
 
 def format_run_header(header: dict) -> str:
     """One line identifying the physics and runtime a world ran on (for seed sharing)."""
-    parts = [f"{k}={header[k]}" for k in header if header[k] not in ("", None)]
+    parts = []
+    for key, value in header.items():
+        if value in ("", None):
+            continue
+        parts.append(f"{key}={json.dumps(value, separators=(',', ':')) if isinstance(value, (list, dict)) else value}")
     return ", ".join(parts)
 
 
@@ -189,13 +193,16 @@ def molequle_get_events(
     """Get the event log from the simulation.
 
     Events include bond formations, bond breaks, entity spawns, entity deaths,
-    disruption cascades, and parameter shifts.
+    disruption cascades, weather, and the chaos knobs: 'perturb' (a scheduled
+    ulp nudge, with before/after values and float64 bits), 'cosmic_flip' (a
+    random bit flip in an entity parameter), and 'config_change' (a physics or
+    chaos setting changed mid-run; physics/math changes carry a warning).
 
     Args:
         since_tick: Only return events after this tick number (default: 0 = all).
         event_type: Filter to a specific type — 'bond_formed', 'bond_broken',
                     'entity_spawned', 'entity_died', 'disruption_cascade',
-                    'parameter_shift', or 'all'.
+                    'perturb', 'cosmic_flip', 'config_change', or 'all'.
         limit: Maximum number of events to return (1–500, default: 100).
     """
     data = api_get("/api/events", params={"since": str(since_tick)})
@@ -239,6 +246,20 @@ def molequle_get_events(
         elif etype == "disruption_cascade":
             did = str(d.get("disruptorId", ""))[:8]
             detail = f"by {did}.. affected={d.get('affectedCount')} bonds_weakened={d.get('bondsWeakenedCount')}"
+        elif etype == "perturb":
+            if d.get("applied"):
+                detail = (f"{d.get('resolved')} {d.get('ulps'):+d} ulp: {d.get('before')!r} → {d.get('after')!r} "
+                          f"(0x{d.get('beforeHex')} → 0x{d.get('afterHex')})")
+            else:
+                detail = f"{d.get('target')} not applied: {d.get('reason')}"
+        elif etype == "cosmic_flip":
+            eid = str(d.get("entity", ""))[:8]
+            clamp = " (clamped)" if d.get("clamped") else ""
+            detail = (f"{eid}.. {d.get('param')} bit {d.get('bit')} ({d.get('mode')}): "
+                      f"{d.get('before', 0):.6g} → {d.get('after', 0):.6g}{clamp}")
+        elif etype == "config_change":
+            warn = f" — {d['warning']}" if d.get("warning") else ""
+            detail = f"{d.get('key')}: {json.dumps(d.get('before'))} → {json.dumps(d.get('after'))}{warn}"
         else:
             detail = json.dumps(d)[:100]
 
@@ -499,6 +520,24 @@ def molequle_set_params(params: str) -> str:
       maxBondsPerEntity: 1-6, integer (default 3) -- bond degree cap per entity
       overcrowdingBondThreshold: 1-10, integer (default 5) -- bond count above which B starts decreasing
 
+    Physics and chaos (each change is logged as a config_change event):
+      physicsVersion: 1 | 2 (default 2 for new worlds) -- 1 = worlds from before 2.1:
+        native Math (results depend on the browser/Node version) and approximate
+        resume after reload. 2 = deterministic math and exact resume. Changing it
+        mid-run changes the world's history from that tick on.
+      mathMode: "deterministic" | "platform" (default "deterministic") -- platform
+        restores engine-dependent native Math on purpose (physics 2 only; 1 is always platform)
+      cosmicRate: 0-100 (default 0 = off) -- random bit flips per entity per 1,000 ticks
+      cosmicMode: "fixed16" | "ieee754" (default "fixed16") -- fixed16 flips one of
+        16 bits of the [0,1] value (most flips tiny, a few dramatic); ieee754 flips
+        a float64 mantissa/exponent bit, clamping to [0,1]
+      perturb: list of {"tick": T, "target": X, "ulps": N} -- one-shot nudges by N
+        ulps (default 1) at absolute tick T. target: "random",
+        "<entity id or unique id prefix>.<S|I|V|B|D>", "season.phase",
+        "storm.intensity", "bloom.intensity" or "current.strength". Setting it
+        replaces the whole list; [] clears it.
+        e.g. '{"perturb": [{"tick": 3000, "target": "random", "ulps": 1}]}'
+
     Look (visual only — never changes the simulation):
       element: "bioluminescent" | "ice" | "fire" | "metallic" (default "bioluminescent") -- entity material
       lighting: "faux3d" | "flat" (default "faux3d") -- shaded spheres with highlights, or flat disks
@@ -546,6 +585,8 @@ def molequle_control(command: str, seed: int | None = None) -> str:
     """Send control commands to the simulation.
 
     Commands are queued and applied on next client poll (~2 seconds).
+    'reset' restarts the current world from its seed with the same physics;
+    'new_run' starts a new world at the current physics version (2).
 
     Args:
         command: One of 'pause', 'resume', 'reset', 'new_run',
@@ -722,6 +763,51 @@ def _thin_evenly(items: list[str], k: int) -> list[str]:
 
 # ── Tool: Get Weather Log ─────────────────────────────────────────────
 
+def _xy(pair) -> str | None:
+    """'(x,y)' from a [x, y] pair, or None if it isn't one."""
+    if isinstance(pair, (list, tuple)) and len(pair) == 2 and all(isinstance(v, (int, float)) for v in pair):
+        return f"({pair[0]:.0f},{pair[1]:.0f})"
+    return None
+
+
+def _format_weather_details(etype: str, details: dict) -> str:
+    """One line for a bloom/storm/current event. Entries logged before 2.1.0
+    may lack an id and location (the old snapshot diff dropped them)."""
+    parts = []
+    if details.get("id"):
+        parts.append(f"{str(details['id'])[:8]}..")
+
+    if etype.startswith("current"):
+        origin = _xy(details.get("origin"))
+        if origin:
+            parts.append(f"from {origin}")
+        direction = details.get("direction")
+        if isinstance(direction, (list, tuple)) and len(direction) == 2:
+            parts.append(f"dir ({direction[0]:.2f},{direction[1]:.2f})")
+        if details.get("width") is not None:
+            parts.append(f"width {details['width']:.0f}")
+        strength = details.get("peakStrength", details.get("strength"))
+        if strength is not None:
+            label = "peak str" if "peakStrength" in details else "str"
+            parts.append(f"{label}={strength:.2f}")
+    else:
+        center = _xy(details.get("center"))
+        if center is None and isinstance(details.get("x"), (int, float)) and isinstance(details.get("y"), (int, float)):
+            center = _xy([details["x"], details["y"]])
+        if center:
+            parts.append(f"at {center}")
+        if details.get("radius") is not None:
+            parts.append(f"r={details['radius']:.0f}")
+        if details.get("intensity") is not None:
+            parts.append(f"int={details['intensity']:.2f}")
+        elif details.get("peakIntensity") is not None and not etype.endswith("_spawn"):
+            parts.append(f"peak int={details['peakIntensity']:.2f}")
+
+    if details.get("lifetime") is not None:
+        parts.append(f"lived {details['lifetime']:,} ticks")
+    return " ".join(parts) if parts else "(no details)"
+
+
 @mcp.tool()
 def molequle_get_weather_log(
     since: int | None = None,
@@ -730,12 +816,16 @@ def molequle_get_weather_log(
 ) -> str:
     """Get the weather event log — lifecycle of blooms, storms, currents, and seasons.
 
-    Records when weather events spawn, end, and when seasons change. Use this
-    to correlate weather events with trend data: "Did bond count spike when
-    a bloom appeared at tick 1,200,000?"
+    Records when weather events spawn, peak, and end, and when seasons change.
+    Use this to correlate weather events with trend data: "Did bond count
+    spike when a bloom appeared at tick 1,200,000?" Each bloom, storm and
+    current has an id; its end event repeats where it was, its peak
+    intensity (or a current's peak strength and width), and how long it lived.
 
-    Event types: bloom_spawn, bloom_end, storm_spawn, storm_end,
-    current_spawn, current_end, season_change.
+    Event types: bloom_spawn, bloom_peak, bloom_end, storm_spawn, storm_peak,
+    storm_end, current_spawn, current_end, season_change, cosmic_flip (cosmic
+    rays are weather: random bit flips in entity parameters, when
+    cosmicRate > 0).
 
     Args:
         since: Only return events after this tick number (optional).
@@ -766,15 +856,15 @@ def molequle_get_weather_log(
         etype = evt.get("event_type", "?")
         details = evt.get("details", {})
 
-        if "season" in etype:
+        if etype == "cosmic_flip":
+            eid = str(details.get("entity", ""))[:8]
+            clamp = " (clamped)" if details.get("clamped") else ""
+            detail = (f"{eid}.. {details.get('param')} bit {details.get('bit')} ({details.get('mode')}): "
+                      f"{details.get('before', 0):.6g} → {details.get('after', 0):.6g}{clamp}")
+        elif "season" in etype:
             detail = f"{details.get('from', '?')} → {details.get('to', '?')} (warmth {details.get('warmth', 0):.2f})"
-        elif "current" in etype:
-            detail = (f"({details.get('x1', 0):.0f},{details.get('y1', 0):.0f})→"
-                      f"({details.get('x2', 0):.0f},{details.get('y2', 0):.0f}) "
-                      f"str={details.get('strength', 0):.2f}")
         else:
-            detail = (f"at ({details.get('x', 0):.0f},{details.get('y', 0):.0f}) "
-                      f"r={details.get('radius', 0):.0f} int={details.get('intensity', 0):.1f}")
+            detail = _format_weather_details(etype, details)
 
         lines.append(f"- **[{tick}]** `{etype}`: {detail}")
 

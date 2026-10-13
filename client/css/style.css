@@ -579,6 +579,50 @@ input[type="range"]::-moz-range-track {
   border-color: var(--accent-teal);
 }
 
+/* ── Physics & Chaos ── */
+
+.panel-note {
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  margin: 2px 0 10px;
+}
+
+.perturb-form {
+  display: grid;
+  grid-template-columns: 64px 1fr 48px;
+  gap: 6px;
+  align-items: center;
+}
+
+.perturb-form input {
+  min-width: 0;
+  background: var(--slider-track);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-value);
+  padding: 5px 6px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  border-radius: 4px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.perturb-form input:focus {
+  border-color: var(--accent-teal);
+}
+
+.perturb-form .btn {
+  padding: 5px 8px;
+}
+
+.perturb-form .panel-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  word-break: break-all;
+}
+
 /* ── Status Rows ── */
 
 .status-row {

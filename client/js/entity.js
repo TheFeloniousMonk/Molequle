@@ -3,6 +3,7 @@
 // All randomness via seeded PRNG for determinism
 
 import { gaussianRandom, seededUUID } from './prng.js';
+import { sm } from './simmath.js';
 
 // Incremented per Entity.update() call to mark that call's nearby set
 let nearbyStampCounter = 0;
@@ -556,7 +557,7 @@ export class Entity {
 
       // Seasonal D: late summer / early autumn, D regen rate increases
       // Use a shifted sine that peaks in late summer (warmth ~0.7-0.8)
-      const autumnPressure = Math.max(0, Math.sin((warmth - 0.3) * Math.PI));
+      const autumnPressure = Math.max(0, sm.sin((warmth - 0.3) * Math.PI));
       this.disruptionCharge += 0.00005 * autumnPressure * V;
     }
 

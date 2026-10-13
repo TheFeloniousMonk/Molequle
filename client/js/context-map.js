@@ -158,12 +158,20 @@ export class ContextMap {
   /**
    * Returns a sparse array of cells with non-trivial values (for serialization).
    * Only includes cells where at least one numeric field is above a small threshold.
+   * With { exact: true }, includes every non-empty cell at full precision
+   * (for saves that must resume exactly).
    */
-  toSparse() {
+  toSparse({ exact = false } = {}) {
     const sparse = [];
     for (let gy = 0; gy < this.gridRows; gy++) {
       for (let gx = 0; gx < this.gridCols; gx++) {
         const cell = this.grid[gy][gx];
+        if (exact) {
+          if (cell.bondFormations || cell.bondBreaks || cell.totalPresence || cell.disruptionEvents || cell.lastActivity) {
+            sparse.push({ gx, gy, bf: cell.bondFormations, bb: cell.bondBreaks, tp: cell.totalPresence, de: cell.disruptionEvents, la: cell.lastActivity });
+          }
+          continue;
+        }
         // Only include cells with meaningful activity
         if (
           cell.bondFormations > 0 ||

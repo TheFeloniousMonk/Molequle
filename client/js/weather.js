@@ -3,6 +3,7 @@
 // Weather happens TO entities, not because of them.
 
 import { seededUUID } from './prng.js';
+import { sm } from './simmath.js';
 
 /**
  * WeatherSystem manages all environmental phenomena:
@@ -75,7 +76,7 @@ export class WeatherSystem {
 
   /** Warmth: 0 = deep winter, 1 = peak summer */
   getWarmth() {
-    return 0.5 + 0.5 * Math.sin(this.seasonPhase);
+    return 0.5 + 0.5 * sm.sin(this.seasonPhase);
   }
 
   /**
@@ -165,8 +166,8 @@ export class WeatherSystem {
 
     // Direction: roughly inward with some randomness
     const angle = rng() * Math.PI * 2;
-    const dx = Math.cos(angle);
-    const dy = Math.sin(angle);
+    const dx = sm.cos(angle);
+    const dy = sm.sin(angle);
 
     const current = {
       id: seededUUID(rng),
@@ -236,7 +237,7 @@ export class WeatherSystem {
 
       // Bell curve intensity over lifetime
       const progress = b.age / b.totalLifetime;
-      b.currentIntensity = b.baseIntensity * Math.sin(progress * Math.PI);
+      b.currentIntensity = b.baseIntensity * sm.sin(progress * Math.PI);
 
       // Track phase for API
       if (progress < 0.3) b.phase = 'building';
@@ -361,7 +362,7 @@ export class WeatherSystem {
       // Bell curve intensity, but sharper rise than blooms
       const progress = s.age / s.totalLifetime;
       // Storms build faster and linger — sin(x^0.7 * pi) peaks earlier
-      s.currentIntensity = s.baseIntensity * Math.sin(Math.pow(progress, 0.7) * Math.PI);
+      s.currentIntensity = s.baseIntensity * sm.sin(sm.pow(progress, 0.7) * Math.PI);
 
       if (progress < 0.25) s.phase = 'building';
       else if (progress < 0.65) s.phase = 'peak';

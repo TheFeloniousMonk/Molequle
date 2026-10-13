@@ -1,6 +1,8 @@
 // ui.js — Accordion-based control panel, mini-status header, parameter sliders, charts, toggles
 
 import { ELEMENTS, ELEMENT_NAMES } from './elements.js';
+import { effectiveMathMode } from './simmath.js';
+import { normalizePerturb } from './chaos.js';
 
 export class UI {
   constructor(config, callbacks) {
@@ -54,10 +56,13 @@ export class UI {
     // 7. WEATHER (collapsed)
     this.panelInner.appendChild(this._buildWeatherSection());
 
-    // 8. VISUAL (collapsed)
+    // 8. PHYSICS & CHAOS (collapsed)
+    this.panelInner.appendChild(this._buildPhysicsSection());
+
+    // 9. VISUAL (collapsed)
     this.panelInner.appendChild(this._buildVisualSection());
 
-    // 9. TOGGLES (expanded)
+    // 10. TOGGLES (expanded)
     this.panelInner.appendChild(this._buildTogglesSection());
   }
 
@@ -112,6 +117,10 @@ export class UI {
         <div class="status-row">
           <span class="status-label">Smoother</span>
           <span class="status-value" id="status-smoother">OFF</span>
+        </div>
+        <div class="status-row">
+          <span class="status-label">Physics</span>
+          <span class="status-value" id="status-physics">-</span>
         </div>
         <hr class="status-separator">
         <div class="status-row">
@@ -287,7 +296,79 @@ export class UI {
     });
   }
 
-  // ── 8. VISUAL ──────────────────────────────────────────────────────
+  // ── 8. PHYSICS & CHAOS ─────────────────────────────────────────────
+  // Every change here is logged as an event; physics and math changes alter
+  // the world's history from that tick on.
+
+  _buildPhysicsSection() {
+    return this._createSection('PHYSICS &amp; CHAOS', false, (container) => {
+      container.appendChild(this._segmentedRow('Physics', 'physicsVersion', [
+        { value: 2, label: 'v2' }, { value: 1, label: 'v1 (legacy)' },
+      ]));
+      container.appendChild(this._segmentedRow('Math', 'mathMode', [
+        { value: 'deterministic', label: 'Deterministic' }, { value: 'platform', label: 'Platform' },
+      ]));
+      const note = document.createElement('div');
+      note.className = 'panel-note';
+      note.textContent = 'Deterministic: the same seed grows the same world on every machine. Platform: native math, so worlds differ between browsers and Node versions. v1 always uses platform math.';
+      container.appendChild(note);
+
+      container.appendChild(this._subHeading('Cosmic rays'));
+      container.appendChild(this._sliderRow('Flips / entity / 1k ticks', 'cosmicRate', 0, 5, 0.05, 0));
+      container.appendChild(this._segmentedRow('Flip mode', 'cosmicMode', [
+        { value: 'fixed16', label: 'Fixed 16-bit' }, { value: 'ieee754', label: 'IEEE 754' },
+      ]));
+
+      container.appendChild(this._subHeading('Perturb'));
+      const form = document.createElement('div');
+      form.className = 'perturb-form';
+      form.innerHTML = `
+        <input type="number" id="perturb-tick" min="1" step="1" placeholder="tick" title="Tick (absolute)">
+        <input type="text" id="perturb-target" value="random" title="random, &lt;entity id or prefix&gt;.S|I|V|B|D, season.phase, storm.intensity, bloom.intensity, current.strength">
+        <input type="number" id="perturb-ulps" value="1" step="1" title="ulps (nonzero integer)">
+        <button class="btn" id="btn-perturb-add">Add</button>
+        <button class="btn" id="btn-perturb-clear">Clear</button>
+        <div class="panel-note" id="perturb-status"></div>
+      `;
+      container.appendChild(form);
+      const $ = (sel) => form.querySelector(sel);
+      $('#btn-perturb-add').addEventListener('click', () => {
+        const tickVal = $('#perturb-tick').value;
+        const entry = {
+          tick: tickVal ? Number(tickVal) : (this.config.currentTick || 0) + 600,
+          target: $('#perturb-target').value.trim() || 'random',
+          ulps: Number($('#perturb-ulps').value || 1),
+        };
+        const { value, error } = normalizePerturb([...(this.config.perturb || []), entry]);
+        if (error) {
+          $('#perturb-status').textContent = error;
+          return;
+        }
+        this.callbacks.onConfigChange('perturb', value);
+        this._showPerturbStatus();
+      });
+      $('#btn-perturb-clear').addEventListener('click', () => {
+        this.callbacks.onConfigChange('perturb', []);
+        this._showPerturbStatus();
+      });
+      requestAnimationFrame(() => this._showPerturbStatus());
+    });
+  }
+
+  _showPerturbStatus() {
+    const el = document.getElementById('perturb-status');
+    if (!el) return;
+    const list = this.config.perturb || [];
+    const now = this.config.currentTick || 0;
+    const upcoming = list.filter(p => p.tick > now);
+    const text = list.length === 0
+      ? 'None scheduled. Blank tick = 600 ticks from now.'
+      : `${upcoming.length} upcoming, ${list.length - upcoming.length} done: ` +
+        list.map(p => `${p.tick} ${p.target} ${p.ulps > 0 ? '+' : ''}${p.ulps}`).join('; ');
+    if (el.textContent !== text) el.textContent = text;
+  }
+
+  // ── 9. VISUAL ──────────────────────────────────────────────────────
 
   _buildVisualSection() {
     return this._createSection('VISUAL', false, (container) => {
@@ -297,7 +378,7 @@ export class UI {
     });
   }
 
-  // ── 9. TOGGLES ─────────────────────────────────────────────────────
+  // ── 10. TOGGLES ────────────────────────────────────────────────────
 
   _buildTogglesSection() {
     return this._createSection('TOGGLES', true, (container) => {
@@ -399,7 +480,7 @@ export class UI {
       btn.type = 'button';
       btn.textContent = opt.label;
       btn.dataset.value = opt.value;
-      if (this.config[key] === opt.value) btn.classList.add('active');
+      if (String(this.config[key]) === String(opt.value)) btn.classList.add('active');
       btn.addEventListener('click', () => {
         this.callbacks.onConfigChange(key, opt.value);
         this.updateToggles(this.config);
@@ -446,6 +527,10 @@ export class UI {
     this._setText('status-seed', seed);
     this._setText('status-smoother', config.smoother ? 'ON' : 'OFF');
     this._setColor('status-smoother', config.smoother ? '#4fd1c5' : '');
+    const chaos = (config.cosmicRate > 0 ? ' · cosmic' : '') +
+      ((config.perturb || []).some(p => p.tick > tick) ? ' · perturb' : '');
+    this._setText('status-physics', `v${config.physicsVersion ?? 1} · ${effectiveMathMode(config)}${chaos}`);
+    if (config.perturb && config.perturb.length) this._showPerturbStatus();
 
     // Mini-status header updates
     this._setText('mini-population', pop);
@@ -628,6 +713,7 @@ export class UI {
       }
     }
     this.updateToggles(config);
+    this._showPerturbStatus();
   }
 
   updateToggles(config) {
@@ -640,7 +726,7 @@ export class UI {
     const groups = document.querySelectorAll('.segmented[data-key]');
     for (const group of groups) {
       for (const btn of group.children) {
-        btn.classList.toggle('active', config[group.dataset.key] === btn.dataset.value);
+        btn.classList.toggle('active', String(config[group.dataset.key]) === btn.dataset.value);
       }
     }
   }

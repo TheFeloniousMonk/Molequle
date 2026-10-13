@@ -125,6 +125,13 @@ export const DEFAULT_CONFIG = {
   secondDegreeMaxRange: 200,     // max distance for second-degree pull
   introductionFactor: 0.3,      // per-shared-neighbor reduction in bond formation time
 
+  // Physics and chaos knobs (see chaos.js, simmath.js)
+  physicsVersion: 2,             // 1 = worlds from before 2.1 (native Math, approximate resume); 2 = current
+  mathMode: 'deterministic',     // deterministic (same world on every engine) | platform (native Math, engine-dependent)
+  cosmicRate: 0,                 // random bit flips per entity per 1,000 ticks (0 = off)
+  cosmicMode: 'fixed16',         // fixed16 (flip one of 16 bits of the [0,1] value) | ieee754 (flip a float64 bit)
+  perturb: [],                   // one-shot nudges: [{ tick, target, ulps }]
+
   // Display toggles
   showTrails: true,
   showContextMap: false,
@@ -138,6 +145,7 @@ export const DEFAULT_CONFIG = {
 // Remotely tunable parameters (POST /api/params, molequle_set_params).
 // Numeric (default type): clamped to [min, max]; integer params are rounded.
 // type 'enum': value must be one of `values`. type 'boolean': true or false.
+// type 'perturb': a list of { tick, target, ulps } (validated by chaos.js).
 // Every key must also exist in DEFAULT_CONFIG — the client ignores keys it
 // doesn't have.
 export const PARAM_RANGES = {
@@ -211,6 +219,12 @@ export const PARAM_RANGES = {
   bPassiveRecoveryRate: { min: 0.0, max: 0.001 },
   maxBondsPerEntity: { min: 1, max: 6, integer: true },
   overcrowdingBondThreshold: { min: 1, max: 10, integer: true },
+  // Physics and chaos (each change is logged; physics/math changes alter history from that tick on)
+  physicsVersion: { min: 1, max: 2, integer: true },
+  mathMode: { type: 'enum', values: ['deterministic', 'platform'] },
+  cosmicRate: { min: 0, max: 100 },
+  cosmicMode: { type: 'enum', values: ['fixed16', 'ieee754'] },
+  perturb: { type: 'perturb' },
   // Look (visual only)
   element: { type: 'enum', values: ['bioluminescent', 'ice', 'fire', 'metallic'] },
   lighting: { type: 'enum', values: ['faux3d', 'flat'] },

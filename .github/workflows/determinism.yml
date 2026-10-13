@@ -1,0 +1,48 @@
+name: Determinism
+
+# Physics version 2 promises: seed + recipe = the same world on every Node
+# version and platform. Constructs run Molequle locally on their users'
+# machines, so test the code once on every platform it will meet.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  determinism:
+    name: node ${{ matrix.node }} / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the legacy test compares against the v2.0.4 tag
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Lint guard (no approximated Math in the simulation core)
+        run: |
+          node tests/lint-simcore.mjs
+          node tests/lint-simcore.mjs --selftest
+
+      - name: dmath accuracy and special values
+        run: node tests/dmath.test.mjs 100000
+
+      - name: Golden traces (5,000 ticks x 10 worlds)
+        run: node tests/golden.test.mjs
+
+      - name: Chaos knobs, exact resume, harness selftest
+        run: node tests/chaos.test.mjs
+
+      - name: Legacy physics v1 reproduces v2.0.4
+        run: node tests/legacy.test.mjs
+
+      - name: Harness selftest (as users run it)
+        run: node tools/molequle-play.mjs selftest

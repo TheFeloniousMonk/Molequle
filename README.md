@@ -55,6 +55,7 @@ A mini-status bar in the header shows population, bonds, and current season at a
 - **Disruption** — disruption threshold, radius, regen cap
 - **Population** — spawn threshold, community/loneliness/crush thresholds, max population, max age
 - **Weather** — season length/amplitude, current/bloom/storm parameters
+- **Physics & Chaos** — physics version, math mode, cosmic rays (rate and flip mode), scheduled perturbations (see [Determinism and chaos](#determinism-and-chaos))
 - **Visual** — trail decay rate, light angle, context map half-life
 - **Toggles** — element selector, 3D lighting, weather visuals, The Smoother, context map, trails, pause
 
@@ -127,6 +128,43 @@ Seasonal cycles, migration currents, fertility blooms, and disruption storms add
 ### The Smoother
 A toggleable rule that suppresses high-variance behavior. Disruption trends toward zero, volatility trends toward a baseline. The question: does suppressing variance produce stability or monoculture?
 
+## Determinism and Chaos
+
+**Seed plus recipe is a world.** Under physics version 2 (the default for new worlds since 2.1), the same seed and settings grow a bit-identical history in every browser, on every Node version, on every platform. Reloading a saved world continues that exact history.
+
+JavaScript fixes `+ − × ÷` and `Math.sqrt` to the bit, but `sin`, `cos`, `log`, `pow` and the other transcendental functions may differ in the last bit between engines, and Molequle amplifies one ulp into a different world. (Seed 23 split Node 22 from Node 24 at tick 3183 over one `Math.pow` call.) So the simulation core uses `dmath`, a port of fdlibm built only from operations the spec fixes. Rendering still uses native `Math`; it never affects the simulation.
+
+Chaos is still there, but as explicit, seeded, logged settings, all off by default:
+
+| Setting | Values | What it does |
+|---|---|---|
+| `mathMode` | `deterministic` (default) · `platform` | `platform` runs the simulation on native `Math` again: engine-dependent on purpose |
+| `cosmicRate` | ≥ 0, flips per entity per 1,000 ticks (default 0) | Rare random bit flips in entity parameters S/I/V/B/D |
+| `cosmicMode` | `fixed16` (default) · `ieee754` | `fixed16` maps the value to 16 bits and flips one (most flips tiny, a few dramatic); `ieee754` flips a mantissa or exponent bit of the float64 and clamps to [0, 1] |
+| `perturb` | list of `{tick, target, ulps}` | At a tick, nudge one value by N ulps. `target`: `random`, `<entity id or id prefix>.<S\|I\|V\|B\|D>`, `season.phase`, `storm.intensity`, `bloom.intensity`, `current.strength` |
+
+Each knob draws from its own random stream derived from the seed, so a chaos run is reproducible too, and a knob at zero never touches its stream: the world is byte-identical to the knob not existing. Every perturbation and flip lands in the event log (`perturb`, `cosmic_flip`) with before/after values; cosmic flips also go to the weather log. Changing a physics or chaos setting mid-run logs a `config_change` event, with a warning for physics and math changes, which alter history from that tick on.
+
+**Physics versions.** `physicsVersion` 2 is deterministic math plus exact resume. Version 1 is Molequle before 2.1: native `Math` and an approximate resume after reload. Saved worlds from before 2.1 load as version 1 and keep running as version 1, so long-running worlds never change physics mid-history; set `physicsVersion: 2` to upgrade one (from that tick on). New runs start at version 2.
+
+**Run header.** Every state push and save carries a run header: physics version, math mode, chaos settings, seed, and the runtime and platform. `molequle_get_state` prints it as one line. Include it when you share a seed.
+
+### Headless harness
+
+`tools/molequle-play.mjs` runs the simulation in Node, no server or browser needed, from a recipe:
+
+```bash
+node tools/molequle-play.mjs -e "set maxPopulation=800; seed 23; run 3000; hash"
+```
+
+Commands include `seed`, `load` (a browser save such as `server/data/latest.json`), `set`, `perturb tick=3000 target=random ulps=1`, `run`, `trace N` (a state hash per tick), `events`, `mathlog` (every approximated math call in one tick, platform mode), `save` and `header`. See the top of the file for the full list. Check your setup with:
+
+```bash
+node tools/molequle-play.mjs selftest
+```
+
+It runs seed 23 for 500 ticks against hashes shipped in the repo and prints PASS, or the run header and the first differing tick. CI (`.github/workflows/determinism.yml`) runs golden traces for seeds 7, 11, 23 and 42 (5,000 ticks, Smoother off and on, plus two chaos runs) on Node 22 and 24, on Linux, Windows and macOS, on every push.
+
 ## Claude Desktop Extension (.mcpb)
 
 A desktop extension lets Claude Desktop observe and control the simulation directly.
@@ -172,9 +210,7 @@ The simulation auto-saves every ~50 seconds, and immediately when a new run star
 
 Trend history (`trends.json`) and the weather log (`weather-log.json`) are saved every 5 minutes when they have new data, on `POST /api/flush`, and on a graceful shutdown (`Ctrl+C`).
 
-The same seed and config reproduce the same world within one JavaScript engine. Browsers can differ in the last bit of some math functions (`Math.sin`, `Math.log`, ...), and the simulation amplifies that, so the same seed can grow a different world in a different browser.
-
-Every state push and save carries a **run header**: physics version, math mode, seed, and the runtime and platform the world ran on. `molequle_get_state` prints it as one line. When you share a seed, include that line, so anyone who gets a different world can tell whether the runtimes differ.
+Under physics version 2, reloading continues the exact world: saves carry the random generators' state and the full-precision context map. Version 1 worlds (saved before 2.1) resume approximately, as they always have. See [Determinism and Chaos](#determinism-and-chaos).
 
 ## Project Structure
 ```
@@ -187,10 +223,14 @@ emergent-system/
     index.html
     css/style.css
     js/
-      main.js         Entry point, animation loop, orchestration
+      main.js         Browser entry point: animation loop, UI, server communication
+      sim.js          Simulation core: world state and the per-tick rules (no DOM)
       params.js       Config defaults + tunable param ranges (shared with server)
       entity.js       Entity class with parameters and behavior
       context-map.js  Accumulated history grid
+      dmath.js        Deterministic sin/cos/log/pow (fdlibm port)
+      simmath.js      Routes sim-core math to dmath or native Math (math mode)
+      chaos.js        Chaos knobs: perturbations and cosmic rays
       renderer.js     Canvas rendering: frame composition, trails, bonds, entities
       sprites.js      Pre-rendered entity sprite atlases (glow, lit body, highlight)
       elements.js     Element materials: color ramps and lighting properties
@@ -206,6 +246,11 @@ emergent-system/
     requirements.txt
     lib/              Bundled Python dependencies
   molequle.mcpb       Packaged desktop extension
+  tools/
+    molequle-play.mjs Headless harness CLI (recipes, trace, mathlog, selftest)
+    harness.mjs       Headless worlds, state hashes, golden-trace definitions
+  tests/              Golden traces, dmath accuracy, chaos/resume, legacy, lint guard
+  .github/workflows/  Determinism CI (Node 22/24 x Linux/Windows/macOS)
   docs/screenshots/   Element screenshots
   CHANGELOG.md
 ```
