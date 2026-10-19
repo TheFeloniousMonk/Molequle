@@ -176,6 +176,17 @@ A desktop extension lets Claude Desktop observe and control the simulation direc
 1. Follow the [Quick Start](#quick-start) and keep the server running.
 2. Double-click `molequle.mcpb` (in the project root, or attached to the [latest release](https://github.com/TheFeloniousMonk/Molequle/releases/latest)) to install in Claude Desktop. It will prompt for the server URL (default: `http://localhost:3333`).
 
+### Mac
+
+`molequle.mcpb` bundles Windows Python libraries and won't start on a Mac. Use `molequle-mac.mcpb` instead:
+
+1. Install [Python 3.13 from python.org](https://www.python.org/downloads/macos/). The extension runs `/Library/Frameworks/Python.framework/Versions/3.13/bin/python3.13`.
+2. Double-click `molequle-mac.mcpb` to install it in Claude Desktop. If the Windows build is already installed, uninstall it first.
+
+It's built for Apple Silicon. To rebuild it, run `sh tools/build-mac-mcpb.sh` from the project root.
+
+The simulation runs in the browser, so keep the Molequle tab open and not minimized. A minimized Safari window pauses the page, and the tools then report stale state.
+
 ### Rebuild from Source
 
 ```bash
